@@ -1,0 +1,17 @@
+# NeuroStream Ignore Rules
+#
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Experiment outputs
+results/checkpoints/
+results/logs/
+results/figures/
+
+# Local tooling artifacts
+.pytest_cache/
+.mypy_cache/
+coverage.xml

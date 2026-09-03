@@ -1,0 +1,4 @@
+# NeuroStream Data Config
+#
+# Placeholder for dataset loading and preprocessing settings.
+# Add dataset names, session split rules, and transform parameters here.

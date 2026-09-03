@@ -1,0 +1,5 @@
+# NeuroStream Hydra Root Config
+#
+# This is the top-level configuration entrypoint.
+# It is intended to compose model, data, and subject settings.
+# Fill this file with Hydra defaults and run-time options in the next step.
