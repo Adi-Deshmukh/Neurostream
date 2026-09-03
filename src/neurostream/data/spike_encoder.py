@@ -1,6 +1,7 @@
 """Dual-scheme spike encoder for preprocessed EEG epochs.
 
-Converts ``(N, 22, T_epoch)`` z-scored EEG into a ``(66, 25, N)`` binary spike
+Converts ``(N, channels, T_epoch)`` z-scored EEG into a
+``(channels * 3, n_timesteps, N)`` binary spike
 tensor using:
 
 * **Rate coding** for alpha (8-13 Hz) and beta (13-30 Hz) bands — preserves
@@ -8,7 +9,8 @@ tensor using:
 * **Time-to-first-spike (TTFS) coding** for the gamma (30+ Hz) band —
   preserves transient onset timing better than rate coding at high frequencies.
 
-66 = 22 channels × 3 frequency bands, 25 timesteps per trial.
+For the BNCI2014-001 defaults this is one virtual channel per input channel
+and frequency band, with the timestep count selected by ``n_timesteps``.
 """
 
 from __future__ import annotations
@@ -28,15 +30,14 @@ ALPHA_BAND = (8.0, 13.0)
 BETA_BAND = (13.0, 30.0)
 GAMMA_BAND = (30.0, 100.0)
 
-N_CHANNELS = 22
-N_BANDS = 3  # alpha, beta, gamma
-N_VIRTUAL_CHANNELS = N_CHANNELS * N_BANDS  # 66
+BANDS = (ALPHA_BAND, BETA_BAND, GAMMA_BAND)
+N_BANDS = len(BANDS)
 
 
 class EncoderResult(NamedTuple):
     """Return type of :func:`encode`."""
 
-    spikes: np.ndarray  # (66, n_timesteps, N) binary
+    spikes: np.ndarray  # (channels * n_bands, n_timesteps, N) binary
     mean_firing_rate: float
 
 
@@ -65,18 +66,18 @@ def _decompose_bands(
 
     Parameters
     ----------
-    epochs : ndarray, shape ``(N, 22, T_epoch)``
+    epochs : ndarray, shape ``(N, channels, T_epoch)``
     sfreq : float
 
     Returns
     -------
-    bands : ndarray, shape ``(3, N, 22, T_epoch)``
-        Index 0 = alpha, 1 = beta, 2 = gamma.
+    bands : ndarray, shape ``(n_bands, N, channels, T_epoch)``
+    Band order follows ``BANDS``.
     """
-    alpha = _bandpass(epochs, sfreq, *ALPHA_BAND)
-    beta = _bandpass(epochs, sfreq, *BETA_BAND)
-    gamma = _bandpass(epochs, sfreq, *GAMMA_BAND)
-    return np.stack([alpha, beta, gamma], axis=0)
+    return np.stack(
+        [_bandpass(epochs, sfreq, *band) for band in BANDS],
+        axis=0,
+    )
 
 
 def _band_power(band_signal: np.ndarray, n_bins: int) -> np.ndarray:
@@ -84,20 +85,20 @@ def _band_power(band_signal: np.ndarray, n_bins: int) -> np.ndarray:
 
     Parameters
     ----------
-    band_signal : ndarray, shape ``(N, 22, T_epoch)``
+    band_signal : ndarray, shape ``(N, channels, T_epoch)``
     n_bins : int
         Number of temporal bins (timesteps).
 
     Returns
     -------
-    power : ndarray, shape ``(N, 22, n_bins)``
+    power : ndarray, shape ``(N, channels, n_bins)``
         Mean squared amplitude per bin.
     """
     n_trials, n_ch, t_total = band_signal.shape
     # Truncate so T divides evenly into n_bins
     usable = (t_total // n_bins) * n_bins
     trimmed = band_signal[:, :, :usable]
-    # Reshape → (N, 22, n_bins, samples_per_bin), then mean-square
+    # Reshape into temporal bins, then compute mean-square power.
     reshaped = trimmed.reshape(n_trials, n_ch, n_bins, -1)
     return np.mean(reshaped ** 2, axis=-1).astype(np.float32, copy=False)
 
@@ -116,10 +117,10 @@ def _rate_encode(
 
     Returns
     -------
-    spikes : ndarray, shape ``(N, 22, n_bins)``  dtype uint8, values {0, 1}.
+    spikes : ndarray, shape ``(N, channels, n_bins)`` dtype uint8, values {0, 1}.
     """
     # Compute threshold per channel: percentile across trials and time bins
-    # power shape (N, 22, n_bins) → collapse axis 0 and 2
+    # Collapse trial and time dimensions while retaining one threshold per channel.
     thresholds = np.percentile(
         power, threshold_percentile, axis=(0, 2), keepdims=True
     )  # shape (1, 22, 1)
@@ -138,7 +139,7 @@ def _ttfs_encode(power: np.ndarray) -> np.ndarray:
 
     Returns
     -------
-    spikes : ndarray, shape ``(N, 22, n_bins)``  dtype uint8, values {0, 1}.
+    spikes : ndarray, shape ``(N, channels, n_bins)`` dtype uint8, values {0, 1}.
     """
     n_trials, n_ch, n_bins = power.shape
     spikes = np.zeros_like(power, dtype=np.uint8)
@@ -164,7 +165,7 @@ def encode(
 
     Parameters
     ----------
-    epochs : ndarray, shape ``(N, 22, T_epoch)``
+    epochs : ndarray, shape ``(N, channels, T_epoch)``
         Z-scored EEG trials from the preprocessing pipeline.
     sfreq : float
         Sampling frequency in Hz (default 250).
@@ -176,7 +177,7 @@ def encode(
     Returns
     -------
     result : EncoderResult
-        ``result.spikes`` — ``(66, n_timesteps, N)`` uint8 binary tensor.
+        ``result.spikes`` — ``(channels * n_bands, n_timesteps, N)`` uint8 tensor.
         ``result.mean_firing_rate`` — scalar in [0, 1].
 
     Raises
@@ -188,13 +189,19 @@ def encode(
         raise ValueError(
             f"epochs must have shape (N, channels, samples), got ndim={epochs.ndim}"
         )
+    if n_timesteps < 1:
+        raise ValueError("n_timesteps must be at least 1")
 
     n_trials, n_ch, t_epoch = epochs.shape
+    if n_trials < 1 or n_ch < 1:
+        raise ValueError("epochs must contain at least one trial and channel")
+    if t_epoch < n_timesteps:
+        raise ValueError("n_timesteps cannot exceed the number of epoch samples")
 
-    # 1. Sub-band decomposition → (3, N, 22, T_epoch)
+    # 1. Sub-band decomposition → (n_bands, N, channels, T_epoch)
     bands = _decompose_bands(epochs, sfreq)
 
-    # 2. Compute binned power per band → (3, N, 22, n_timesteps)
+    # 2. Compute binned power per band → (n_bands, N, channels, n_timesteps)
     powers = np.stack(
         [_band_power(bands[b], n_timesteps) for b in range(N_BANDS)], axis=0
     )
@@ -204,14 +211,14 @@ def encode(
     beta_spikes = _rate_encode(powers[1], rate_threshold_pct)   # (N, 22, T)
     gamma_spikes = _ttfs_encode(powers[2])                      # (N, 22, T)
 
-    # 4. Stack bands → (N, 66, n_timesteps) then transpose to (66, T, N)
+    # 4. Stack bands, then transpose to (channels * n_bands, T, N).
     all_spikes = np.concatenate(
         [alpha_spikes, beta_spikes, gamma_spikes], axis=1
-    )  # (N, 66, n_timesteps)
-    spike_tensor = np.transpose(all_spikes, (1, 2, 0))  # (66, n_timesteps, N)
+    )  # (N, channels * n_bands, n_timesteps)
+    spike_tensor = np.transpose(all_spikes, (1, 2, 0))
 
     # 5. Validate & log
-    assert spike_tensor.shape == (N_VIRTUAL_CHANNELS, n_timesteps, n_trials)
+    assert spike_tensor.shape == (n_ch * N_BANDS, n_timesteps, n_trials)
     mean_fr = float(spike_tensor.mean())
     logger.info(
         "Spike encoding complete: shape=%s, mean_firing_rate=%.4f (%.1f%%)",

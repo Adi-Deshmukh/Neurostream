@@ -9,8 +9,6 @@ import pytest
 
 from neurostream.data.spike_encoder import (
     N_BANDS,
-    N_CHANNELS,
-    N_VIRTUAL_CHANNELS,
     encode,
 )
 
@@ -18,6 +16,7 @@ from neurostream.data.spike_encoder import (
 
 SFREQ = 250.0
 N_TRIALS = 8
+N_CHANNELS = 22
 T_EPOCH = 1000  # 4 s at 250 Hz
 N_TIMESTEPS = 25
 
@@ -42,7 +41,7 @@ class TestOutputShape:
     """Output tensor must be (66, 25, N)."""
 
     def test_output_shape(self, encoded):
-        assert encoded.spikes.shape == (N_VIRTUAL_CHANNELS, N_TIMESTEPS, N_TRIALS)
+        assert encoded.spikes.shape == (N_CHANNELS * N_BANDS, N_TIMESTEPS, N_TRIALS)
 
     def test_virtual_channel_count(self, encoded):
         """66 = 22 channels × 3 bands."""
@@ -117,11 +116,17 @@ class TestThresholdControl:
 class TestEdgeCases:
     """Edge cases: single trial, minimal input."""
 
+    def test_channel_and_timestep_dimensions_are_dynamic(self):
+        rng = np.random.default_rng(7)
+        dynamic_epochs = rng.standard_normal((2, 5, 400)).astype(np.float32)
+        result = encode(dynamic_epochs, sfreq=250.0, n_timesteps=10)
+        assert result.spikes.shape == (5 * N_BANDS, 10, 2)
+
     def test_single_trial(self):
         rng = np.random.default_rng(99)
         single = rng.standard_normal((1, N_CHANNELS, T_EPOCH)).astype(np.float32)
         result = encode(single, sfreq=SFREQ, n_timesteps=N_TIMESTEPS)
-        assert result.spikes.shape == (N_VIRTUAL_CHANNELS, N_TIMESTEPS, 1)
+        assert result.spikes.shape == (N_CHANNELS * N_BANDS, N_TIMESTEPS, 1)
         assert set(np.unique(result.spikes)).issubset({0, 1})
 
 
