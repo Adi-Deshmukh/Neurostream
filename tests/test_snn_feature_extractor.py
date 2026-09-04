@@ -35,11 +35,11 @@ def dummy_spikes() -> torch.Tensor:
 
 
 class TestOutputShape:
-    """Input (66, 25, N) must produce output (N, 128)."""
+    """Input (66, 25, N) must produce output (N, 512)."""
 
     def test_output_shape(self, model, dummy_spikes):
         out = model(dummy_spikes)
-        assert out.shape == (BATCH_SIZE, 128)
+        assert out.shape == (BATCH_SIZE, 512)
 
 
 # ── output validity ─────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ class TestEdgeCases:
         """Batch size 1 should work correctly."""
         spikes = (torch.rand(N_VIRTUAL_CHANNELS, N_TIMESTEPS, 1) > 0.65).float()
         out = model(spikes)
-        assert out.shape == (1, 128)
+        assert out.shape == (1, 512)
         assert torch.isfinite(out).all()
 
     def test_custom_dimensions(self):

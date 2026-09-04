@@ -170,6 +170,12 @@ def _prototype_training(
 				prototype_logits(features, learned_prototypes, temperature),
 				train_y[indices],
 			)
+			if getattr(network, "spatial_layer", None) is not None:
+				w = network.spatial_layer.spatial_conv.weight.squeeze(-1)
+				w_norm = F.normalize(w, dim=-1)
+				gram = w_norm @ w_norm.T
+				eye = torch.eye(gram.shape[0], device=gram.device)
+				loss = loss + 0.05 * F.mse_loss(gram, eye)
 			optimizer.zero_grad()
 			loss.backward()
 			nn.utils.clip_grad_norm_(
@@ -434,7 +440,7 @@ def train_subject(
 	test_encoded = encode(test_session.X)
 	_set_seed(seed)
 	model = SNNFeatureExtractor(
-		in_features=train_encoded.spikes.shape[0], hidden=hidden
+		in_features=train_encoded.spikes.shape[0], hidden=hidden, out_features=512
 	)
 	return train_phase_a(
 		train_encoded.spikes,

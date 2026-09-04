@@ -102,8 +102,9 @@ def run_subject_cross_session(
     validation_fraction: float = 0.2,
     augmentation_probability: float = 0.2,
     hidden: int = 256,
-    momentum: float = 0.95,
-    confidence_threshold: float = 0.8,
+    out_features: int = 512,
+    momentum: float = 0.70,
+    confidence_threshold: float = 0.75,
     enable_consolidation: bool = True,
     consolidation_interval: int = 50,
     sleep_steps: int = 5,
@@ -129,7 +130,7 @@ def run_subject_cross_session(
 
     # 3. Phase A: Supervised training & freezing
     in_features = train_spikes.shape[0]
-    model = SNNFeatureExtractor(in_features=in_features, hidden=hidden)
+    model = SNNFeatureExtractor(in_features=in_features, hidden=hidden, out_features=out_features)
 
     save_dir = Path(checkpoint_dir) if checkpoint_dir is not None else Path("results/checkpoints/sweep") / f"sub_{subject}_seed_{seed}"
 
@@ -215,8 +216,9 @@ def run_cross_session_sweep(
     validation_fraction: float = 0.2,
     augmentation_probability: float = 0.2,
     hidden: int = 256,
-    momentum: float = 0.95,
-    confidence_threshold: float = 0.8,
+    out_features: int = 512,
+    momentum: float = 0.70,
+    confidence_threshold: float = 0.75,
     enable_consolidation: bool = True,
     consolidation_interval: int = 50,
     sleep_steps: int = 5,
@@ -240,6 +242,7 @@ def run_cross_session_sweep(
                 validation_fraction=validation_fraction,
                 augmentation_probability=augmentation_probability,
                 hidden=hidden,
+                out_features=out_features,
                 momentum=momentum,
                 confidence_threshold=confidence_threshold,
                 enable_consolidation=enable_consolidation,

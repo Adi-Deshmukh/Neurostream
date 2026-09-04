@@ -16,6 +16,7 @@ def main() -> None:
 	parser.add_argument("--temperature", type=float, default=0.1)
 	parser.add_argument("--augmentation-probability", type=float, default=0.0)
 	parser.add_argument("--hidden", type=int, default=256)
+	parser.add_argument("--out-features", type=int, default=512)
 	parser.add_argument("--validation-fraction", type=float, default=0.2)
 	parser.add_argument("--checkpoint-dir", default="results/checkpoints")
 	args = parser.parse_args()

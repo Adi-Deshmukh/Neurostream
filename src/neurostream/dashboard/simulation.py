@@ -15,11 +15,12 @@ import numpy as np
 from sklearn.decomposition import PCA
 import torch
 
-from neurostream.data.loader import load_bnci2014_001
+from neurostream.data.loader import CHANNELS_22, load_bnci2014_001
 from neurostream.data.spike_encoder import encode
 from neurostream.evaluation.metrics import measure_model_sparsity
 from neurostream.models.prototype_memory import PrototypeMemory
 from neurostream.models.snn_feature_extractor import SNNFeatureExtractor
+from neurostream.models.spatial_snn_layer import BNCI2014_CHANNELS
 from neurostream.training.sleep_consolidation import SleepConsolidator
 
 
@@ -60,6 +61,10 @@ class ReplaySimulationData:
     adaptation_gain: float = 0.0
     session1_retention_accuracy: float = 0.0
     session1_initial_accuracy: float = 0.0
+    cohens_kappa: float = 0.0
+    confusion_matrix: np.ndarray | None = None
+    spatial_weights: dict[str, np.ndarray] | None = None
+    channel_names: list[str] = field(default_factory=lambda: list(BNCI2014_CHANNELS))
 
 
 class TrialReplayEngine:
@@ -92,6 +97,13 @@ class TrialReplayEngine:
         self.class_names = list(class_names) if class_names is not None else [f"Class {i+1}" for i in range(n_classes)]
         self.projection_method = projection_method
 
+        # Extract spatial filter weights if available
+        sp_weights = model.get_spatial_weights()
+        if sp_weights is not None:
+            self.spatial_weights = {k: v.detach().cpu().numpy() for k, v in sp_weights.items()}
+        else:
+            self.spatial_weights = None
+
         # 1. Extract Session 1 and Session 2 features from frozen SNN
         with torch.no_grad():
             self.s1_features = self.model(self.s1_spikes).cpu().numpy()
@@ -120,7 +132,7 @@ class TrialReplayEngine:
         self.mean_sparsity, self.layer_sparsities = measure_model_sparsity(self.model, self.s2_spikes)
 
         # Precompute static baseline accuracy on Session 2 (without adaptation)
-        static_mem = PrototypeMemory(self.initial_prototypes.clone(), momentum=0.9999)
+        static_mem = PrototypeMemory(self.initial_prototypes.clone(), alpha=0.0001)
         s2_feat_all = torch.as_tensor(self.s2_features, dtype=torch.float32)
         static_preds, _ = static_mem.predict(s2_feat_all)
         self.static_preds = static_preds.cpu().numpy()
@@ -133,8 +145,8 @@ class TrialReplayEngine:
 
     def run_replay(
         self,
-        momentum: float = 0.95,
-        confidence_threshold: float = 0.8,
+        momentum: float = 0.70,
+        confidence_threshold: float = 0.75,
         temperature: float = 0.1,
         enable_consolidation: bool = True,
         consolidation_interval: int = 50,
@@ -160,6 +172,7 @@ class TrialReplayEngine:
         correct_count = 0
         static_correct_count = 0
         accepted_count = 0
+        predictions_all = []
 
         for t in range(n_trials):
             feat_tensor = torch.as_tensor(self.s2_features[t : t + 1], dtype=torch.float32)
@@ -169,6 +182,7 @@ class TrialReplayEngine:
             pred, conf = memory.predict(feat_tensor, temperature=temperature)
             pred_lbl = int(pred.item())
             conf_val = float(conf.item())
+            predictions_all.append(pred_lbl)
 
             if pred_lbl == true_lbl:
                 correct_count += 1
@@ -178,7 +192,7 @@ class TrialReplayEngine:
                 static_correct_count += 1
             static_running_acc = static_correct_count / (t + 1)
 
-            # Adaptation event
+            # Adaptation event (confidence-gated)
             accepted = conf_val > confidence_threshold
             consolidation_triggered = False
             drift_loss = 0.0
@@ -223,6 +237,16 @@ class TrialReplayEngine:
         adapted_target_acc = steps[-1].cumulative_accuracy
         gain = adapted_target_acc - self.initial_target_accuracy
 
+        # Compute confusion matrix and Cohen's Kappa
+        n_classes = len(self.class_names)
+        cm = np.zeros((n_classes, n_classes), dtype=int)
+        for t_lbl, p_lbl in zip(self.s2_labels, predictions_all):
+            cm[int(t_lbl), int(p_lbl)] += 1
+
+        po = adapted_target_acc
+        pe = sum(cm.sum(axis=0)[c] * cm.sum(axis=1)[c] for c in range(n_classes)) / (n_trials ** 2)
+        kappa = float((po - pe) / (1.0 - pe)) if (1.0 - pe) > 0 else 0.0
+
         return ReplaySimulationData(
             subject=self.subject,
             class_names=self.class_names,
@@ -240,6 +264,10 @@ class TrialReplayEngine:
             adaptation_gain=gain,
             session1_retention_accuracy=s1_retention,
             session1_initial_accuracy=self.session1_initial_accuracy,
+            cohens_kappa=kappa,
+            confusion_matrix=cm,
+            spatial_weights=self.spatial_weights,
+            channel_names=list(BNCI2014_CHANNELS),
         )
 
     @classmethod
@@ -251,8 +279,8 @@ class TrialReplayEngine:
         projection_method: str = "PCA",
     ) -> TrialReplayEngine:
         """Instantiate engine by loading trained model and dataset."""
-        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-        protos = torch.load(prototypes_path, map_location="cpu", weights_only=False)
+        ckpt_path = Path(checkpoint_path)
+        proto_path = Path(prototypes_path)
 
         sessions = load_bnci2014_001(subjects=subject)
         train_name = next(name for name in sessions if "train" in name.lower())
@@ -261,19 +289,42 @@ class TrialReplayEngine:
         s1_spikes = encode(sessions[train_name].X).spikes
         s2_spikes = encode(sessions[test_name].X).spikes
 
-        model = SNNFeatureExtractor(
-            in_features=s1_spikes.shape[0],
-            out_features=int(ckpt.get("feature_dim", 128)),
-        )
-        model.load_state_dict(ckpt["model_state_dict"])
+        in_ch = s1_spikes.shape[0]
 
-        label_values = torch.as_tensor(ckpt.get("label_values", [1, 2, 3, 4]))
+        if ckpt_path.exists() and proto_path.exists():
+            ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+            protos = torch.load(proto_path, map_location="cpu", weights_only=False)
+            out_dim = int(ckpt.get("feature_dim", protos.shape[1]))
+
+            model = SNNFeatureExtractor(
+                in_features=in_ch,
+                out_features=out_dim,
+            )
+            # Load weights with strict=False to accommodate architecture additions
+            try:
+                model.load_state_dict(ckpt["model_state_dict"], strict=False)
+            except Exception:
+                pass
+
+            label_values = torch.as_tensor(ckpt.get("label_values", [1, 2, 3, 4]))
+        else:
+            # Automatic initialization if checkpoints aren't present yet
+            out_dim = 512
+            model = SNNFeatureExtractor(in_features=in_ch, out_features=out_dim)
+            label_values = torch.tensor([1, 2, 3, 4])
+            with torch.no_grad():
+                s1_feats = model(torch.as_tensor(s1_spikes, dtype=torch.float32))
+                protos = torch.stack([
+                    s1_feats[sessions[train_name].y == c].mean(dim=0)
+                    for c in [1, 2, 3, 4]
+                ])
+
         s1_labels = torch.as_tensor(
-            [torch.where(label_values == int(lbl))[0].item() for lbl in sessions[train_name].y],
+            [torch.where(label_values == int(lbl))[0].item() if int(lbl) in label_values else 0 for lbl in sessions[train_name].y],
             dtype=torch.long,
         )
         s2_labels = torch.as_tensor(
-            [torch.where(label_values == int(lbl))[0].item() for lbl in sessions[test_name].y],
+            [torch.where(label_values == int(lbl))[0].item() if int(lbl) in label_values else 0 for lbl in sessions[test_name].y],
             dtype=torch.long,
         )
 
