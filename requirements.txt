@@ -2,3 +2,9 @@
 scipy>=1.10
 mne>=1.5
 moabb>=1.1
+torch>=2.0
+snntorch>=0.7
+streamlit>=1.30
+scikit-learn>=1.3
+plotly>=5.18
+matplotlib>=3.7

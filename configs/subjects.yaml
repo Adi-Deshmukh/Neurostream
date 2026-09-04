@@ -1,4 +1,28 @@
 # NeuroStream Subject Config
 #
-# Placeholder for subject IDs and random seeds.
-# Add lists for 9-subject sweeps and seed-control metadata here.
+# Subject IDs and random seeds for the reproducible cross-subject evaluation sweep.
+
+subjects:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+
+seeds:
+  - 42
+  - 123
+  - 456
+  - 789
+  - 999
+
+protocol:
+  tune_subject: 1
+  frozen_subjects: [2, 3, 4, 5, 6, 7, 8, 9]
+  adaptation_momentum: 0.95
+  confidence_threshold: 0.8
+  enable_consolidation: true

@@ -23,7 +23,7 @@ def load_bnci2014_001(
 	tmin: float = 2.0,
 	tmax: float = 6.0,
 	l_freq: float = 4.0,
-	h_freq: float = 40.0,
+	h_freq: float = 100.0,
 ) -> dict[str, SessionData]:
 	"""Load BNCI2014_001 and return trials grouped by MOABB session.
 

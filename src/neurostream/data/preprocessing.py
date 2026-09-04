@@ -7,7 +7,7 @@ from scipy.signal import butter, sosfiltfilt
 
 
 def bandpass_filter(
-	data: np.ndarray, sfreq: float, l_freq: float = 4.0, h_freq: float = 40.0
+	data: np.ndarray, sfreq: float, l_freq: float = 4.0, h_freq: float = 100.0
 ) -> np.ndarray:
 	"""Apply a zero-phase Butterworth bandpass to ``(channels, samples)`` data."""
 	if data.ndim != 2:
@@ -33,7 +33,7 @@ def preprocess_session(
 	tmin: float = 2.0,
 	tmax: float = 6.0,
 	l_freq: float = 4.0,
-	h_freq: float = 40.0,
+	h_freq: float = 100.0,
 ) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]]]:
 	"""Convert one MNE Raw run into normalized EEG trials and metadata."""
 	import mne

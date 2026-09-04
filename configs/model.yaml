@@ -2,3 +2,22 @@
 #
 # Placeholder for SNN and prototype-memory hyperparameters.
 # Add architecture, neuron, and optimization settings here.
+
+snn:
+  in_features: 66
+  hidden: 256
+  out_features: 128
+  beta: 0.9
+  threshold: 0.5
+
+prototype_memory:
+  momentum: 0.95
+  temperature: 0.1
+  confidence_threshold: 0.8
+
+sleep_consolidation:
+  enabled: true
+  interval: 50
+  steps: 5
+  noise_std: 0.05
+  pull_rate: 0.5
