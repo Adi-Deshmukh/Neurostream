@@ -617,17 +617,39 @@ with tab_cross_subject:
 
     table_data = []
     for s in range(1, 10):
-        c_p = Path(f"results/checkpoints/phase_a_subject_{s}.pt")
         subject_manifest_runs = manifest_runs_by_subject.get(s, [])
         if subject_manifest_runs:
-            if s == subject_id and selected_run is not None:
-                subject_manifest_runs = [selected_run]
-            elif len(subject_manifest_runs) != 1:
-                st.info(f"Subject S{s:02d}: select a seed in the sidebar to inspect this run.")
+            run_records = subject_manifest_runs
+        else:
+            run_records = [{
+                "checkpoint": f"results/checkpoints/phase_a_subject_{s}.pt",
+                "evaluation_artifact": (
+                    artifact_file if s == subject_id
+                    else Path(f"results/checkpoints/evaluation_subject_{s}.json")
+                ),
+                "seed": "legacy",
+            }]
+        metric_values: dict[str, list[float]] = {
+            "target_static_baseline_acc": [],
+            "target_prequential_acc": [],
+            "target_retrospective_acc": [],
+            "source_accuracy_after_adaptation": [],
+        }
+        checkpoint_data_rows = []
+        valid_seeds = []
+        for run_record in run_records:
+            c_p = Path(run_record["checkpoint"])
+            artifact_path = Path(run_record["evaluation_artifact"])
+            if not c_p.exists() or not artifact_path.exists():
                 continue
-            c_p = Path(subject_manifest_runs[0]["checkpoint"])
-        if c_p.exists():
-            data = torch.load(c_p, map_location="cpu", weights_only=False)
+            try:
+                data = torch.load(c_p, map_location="cpu", weights_only=False)
+                evaluation_artifact = load_evaluation_artifact(
+                    artifact_path, checkpoint_path=c_p, subject=s
+                )
+            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+                st.error(f"Subject S{s:02d} run {run_record.get('seed')} rejected: {error}")
+                continue
             required_contract = (
                 "label_values",
                 "label_names",
@@ -636,59 +658,35 @@ with tab_cross_subject:
             )
             missing_contract = [key for key in required_contract if not data.get(key)]
             if missing_contract:
-                st.error(
-                    f"Subject S{s:02d} checkpoint rejected: missing "
-                    f"{', '.join(missing_contract)}."
-                )
                 continue
             if len(data["label_values"]) != len(data["label_names"]):
-                st.error(f"Subject S{s:02d} checkpoint rejected: invalid label mapping.")
-                continue
-            if subject_manifest_runs:
-                manifest_run = subject_manifest_runs[0]
-                c_p = Path(manifest_run["checkpoint"])
-                artifact_path = Path(manifest_run["evaluation_artifact"])
-                if not c_p.exists():
-                    st.info(f"Subject S{s:02d}: selected checkpoint is unavailable.")
-                    continue
-                data = torch.load(c_p, map_location="cpu", weights_only=False)
-            else:
-                artifact_path = artifact_file if s == subject_id else c_p.parent / f"evaluation_subject_{s}.json"
-            if not artifact_path.exists():
-                st.info(f"Subject S{s:02d}: held-out evaluation has not been run.")
-                continue
-            try:
-                evaluation_artifact = load_evaluation_artifact(
-                    artifact_path, checkpoint_path=c_p, subject=s
-                )
-            except (OSError, ValueError, TypeError) as error:
-                st.error(f"Subject S{s:02d} evaluation rejected: {error}")
                 continue
             metrics = evaluation_artifact["metrics"]
-            required_metrics = {
-                "target_static_baseline_acc",
-                "target_prequential_acc",
-                "target_retrospective_acc",
-                "source_accuracy_after_adaptation",
-            }
-            missing_metrics = required_metrics.difference(metrics)
-            if missing_metrics:
-                st.error(
-                    f"Subject S{s:02d} evaluation rejected: missing metrics "
-                    f"{sorted(missing_metrics)}"
-                )
-                continue
-            table_data.append({
-                "Subject": f"Subject S{s:02d}",
-                "Phase A Train": f"{data.get('train_accuracy', 0)*100:.2f}%",
-                "Phase A Val": f"{data.get('validation_accuracy', 0)*100:.2f}%",
-                "Static Target Baseline": f"{metrics['target_static_baseline_acc']*100:.2f}%",
-                "Prequential Target Accuracy": f"{metrics['target_prequential_acc']*100:.2f}%",
-                "Retrospective Diagnostic": f"{metrics['target_retrospective_acc']*100:.2f}%",
-                "Source Accuracy After": f"{metrics['source_accuracy_after_adaptation']*100:.2f}%",
-                "Feature Dim": data["feature_dim"],
-                "Classes": len(data["label_values"]),
-            })
+            for name in metric_values:
+                metric_values[name].append(float(metrics[name]))
+            checkpoint_data_rows.append(data)
+            valid_seeds.append(str(run_record.get("seed")))
+        if not checkpoint_data_rows:
+            st.info(f"Subject S{s:02d}: no valid held-out evaluation runs are available.")
+            continue
+        def summary(name: str) -> str:
+            values = metric_values[name]
+            mean = float(np.mean(values))
+            spread = float(np.std(values))
+            return f"{mean * 100:.2f}% ± {spread * 100:.2f}%"
+        first_data = checkpoint_data_rows[0]
+        table_data.append({
+            "Subject": f"Subject S{s:02d}",
+            "Seeds": ", ".join(valid_seeds),
+            "Phase A Train": f"{np.mean([d.get('train_accuracy', 0) for d in checkpoint_data_rows]) * 100:.2f}%",
+            "Phase A Val": f"{np.mean([d.get('validation_accuracy', 0) for d in checkpoint_data_rows]) * 100:.2f}%",
+            "Static Target Baseline": summary("target_static_baseline_acc"),
+            "Prequential Target Accuracy": summary("target_prequential_acc"),
+            "Retrospective Diagnostic": summary("target_retrospective_acc"),
+            "Source Accuracy After": summary("source_accuracy_after_adaptation"),
+            "Feature Dim": first_data["feature_dim"],
+            "Classes": len(first_data["label_values"]),
+        })
 
     df_results = pd.DataFrame(table_data)
     st.dataframe(df_results, width="stretch")
@@ -700,8 +698,8 @@ with tab_cross_subject:
         fig_acc = go.Figure()
         test_rows = [d for d in table_data if d["Prequential Target Accuracy"] != "N/A"]
         sub_labels = [d["Subject"] for d in test_rows]
-        snn_accs = [float(d["Prequential Target Accuracy"].replace("%", "")) for d in test_rows]
-        static_accs = [float(d["Static Target Baseline"].replace("%", "")) for d in test_rows]
+        snn_accs = [float(d["Prequential Target Accuracy"].split(" ±")[0].replace("%", "")) for d in test_rows]
+        static_accs = [float(d["Static Target Baseline"].split(" ±")[0].replace("%", "")) for d in test_rows]
 
         fig_acc.add_trace(go.Bar(x=sub_labels, y=static_accs, name="Static Target Baseline", marker_color="#CBD5E1"))
         fig_acc.add_trace(go.Bar(x=sub_labels, y=snn_accs, name="Prequential Adaptation", marker_color="#0284C7"))

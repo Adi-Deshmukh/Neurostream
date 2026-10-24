@@ -124,6 +124,13 @@ def test_cross_session_sweep_with_mock_dataset(tmp_path):
         encoder_rate_threshold_pct=60.0,
         model_beta=0.8,
         model_threshold=0.4,
+        model_out_features=16,
+        output_evaluation_dir=tmp_path / "evaluations",
+        expected_sampling_frequency_hz=250.0,
+        epoch_tmin=2.0,
+        epoch_tmax=6.0,
+        filter_l_freq_hz=4.0,
+        filter_h_freq_hz=100.0,
         hidden=32,
     )
 
@@ -134,7 +141,7 @@ def test_cross_session_sweep_with_mock_dataset(tmp_path):
     assert 0.0 <= run.post_adaptation_acc <= 1.0
     assert 0.0 <= run.spike_sparsity <= 1.0
     assert csv_file.exists()
-    assert (tmp_path / "checkpoints" / "sub_1" / "seed_42" / "evaluation_subject_1.json").exists()
+    assert (tmp_path / "evaluations" / "sub_1" / "seed_42" / "subject_1_seed_42.json").exists()
     assert (tmp_path / "checkpoints" / "evaluation_manifest.json").exists()
     checkpoint = torch.load(
         tmp_path / "checkpoints" / "sub_1" / "seed_42" / "phase_a_subject_1.pt",
@@ -143,6 +150,8 @@ def test_cross_session_sweep_with_mock_dataset(tmp_path):
     )
     assert checkpoint["encoder_calibration"]["n_timesteps"] == 10
     assert checkpoint["encoder_calibration"]["rate_threshold_pct"] == 60.0
+    assert checkpoint["feature_dim"] == 16
+    assert checkpoint["preprocessing_contract"]["effective_configuration"]["model_out_features"] == 16
 
     with csv_file.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)

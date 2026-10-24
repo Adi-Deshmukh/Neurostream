@@ -119,8 +119,17 @@ def run_subject_cross_session(
     hidden: int = 256,
     model_beta: float = 0.9,
     model_threshold: float = 0.5,
+    model_out_features: int = 128,
     encoder_timesteps: int = 25,
     encoder_rate_threshold_pct: float = 50.0,
+    expected_sampling_frequency_hz: float = 250.0,
+    epoch_tmin: float = 2.0,
+    epoch_tmax: float = 6.0,
+    filter_l_freq_hz: float = 4.0,
+    filter_h_freq_hz: float = 100.0,
+    output_evaluation_dir: str | Path | None = None,
+    dataset_name: str = "BNCI2014_001",
+    dataset_path: str | Path | None = None,
     momentum: float = 0.95,
     confidence_threshold: float = 0.8,
     enable_consolidation: bool = True,
@@ -135,13 +144,28 @@ def run_subject_cross_session(
     seed_everything(seed)
 
     # 1. Load Sessions
-    sessions = load_bnci2014_001(subjects=subject, dataset=dataset)
+    if dataset_name != "BNCI2014_001":
+        raise ValueError(f"unsupported dataset_name: {dataset_name}")
+    sessions = load_bnci2014_001(
+        subjects=subject,
+        dataset=dataset,
+        dataset_path=dataset_path,
+        tmin=epoch_tmin,
+        tmax=epoch_tmax,
+        l_freq=filter_l_freq_hz,
+        h_freq=filter_h_freq_hz,
+    )
     train_name = next(name for name in sessions if "train" in name.lower())
     test_name = next(name for name in sessions if "test" in name.lower())
 
     train_session = sessions[train_name]
     test_session = sessions[test_name]
 
+    if not np.isclose(train_session.sfreq, expected_sampling_frequency_hz, atol=1e-3):
+        raise ValueError(
+            "training session sampling frequency does not match configuration: "
+            f"{train_session.sfreq} Hz vs {expected_sampling_frequency_hz} Hz"
+        )
     if not np.isclose(train_session.sfreq, test_session.sfreq, atol=1e-3):
         raise ValueError(
             "cross-session evaluation requires matching sampling frequencies; "
@@ -165,6 +189,7 @@ def run_subject_cross_session(
     model = SNNFeatureExtractor(
         in_features=in_features,
         hidden=hidden,
+        out_features=model_out_features,
         beta=model_beta,
         threshold=model_threshold,
     )
@@ -194,15 +219,15 @@ def run_subject_cross_session(
             for value in np.unique(train_session.y)
         ],
         preprocessing_contract={
-            "sampling_frequency_hz": train_session.sfreq,
+            "sampling_frequency_hz": expected_sampling_frequency_hz,
             "filter_settings": {
-                "l_freq_hz": train_session.l_freq,
-                "h_freq_hz": train_session.h_freq,
+                "l_freq_hz": filter_l_freq_hz,
+                "h_freq_hz": filter_h_freq_hz,
                 "order": 4,
             },
             "epoch_window_seconds": {
-                "tmin": train_session.tmin,
-                "tmax": train_session.tmax,
+                "tmin": epoch_tmin,
+                "tmax": epoch_tmax,
             },
             "channel_order": list(train_session.channel_names),
             "effective_configuration": {
@@ -216,6 +241,14 @@ def run_subject_cross_session(
                 "model_hidden": hidden,
                 "model_beta": model_beta,
                 "model_threshold": model_threshold,
+                "model_out_features": model_out_features,
+                "dataset_name": dataset_name,
+                "dataset_path": str(dataset_path) if dataset_path else None,
+                "sampling_frequency_hz": expected_sampling_frequency_hz,
+                "epoch_tmin": epoch_tmin,
+                "epoch_tmax": epoch_tmax,
+                "filter_l_freq_hz": filter_l_freq_hz,
+                "filter_h_freq_hz": filter_h_freq_hz,
             },
         },
     )
@@ -285,8 +318,13 @@ def run_subject_cross_session(
         consolidation_phases=phase_b.consolidation_phases,
         consolidation_enabled=enable_consolidation,
     )
+    evaluation_dir = (
+        Path(output_evaluation_dir)
+        if output_evaluation_dir is not None
+        else save_dir
+    )
     save_evaluation_artifact(
-        save_dir / f"evaluation_subject_{subject}.json",
+        evaluation_dir / f"subject_{subject}_seed_{seed}.json",
         checkpoint_path=phase_a.checkpoint_path,
         subject=subject,
         train_session=train_name,
@@ -307,6 +345,14 @@ def run_subject_cross_session(
             "encoder_rate_threshold_pct": encoder_rate_threshold_pct,
             "model_beta": model_beta,
             "model_threshold": model_threshold,
+            "model_out_features": model_out_features,
+            "dataset_name": dataset_name,
+            "dataset_path": str(dataset_path) if dataset_path else None,
+            "sampling_frequency_hz": expected_sampling_frequency_hz,
+            "epoch_tmin": epoch_tmin,
+            "epoch_tmax": epoch_tmax,
+            "filter_l_freq_hz": filter_l_freq_hz,
+            "filter_h_freq_hz": filter_h_freq_hz,
         },
         run_id=f"subject-{subject}-seed-{seed}",
     )
@@ -327,6 +373,15 @@ def run_cross_session_sweep(
     model_threshold: float = 0.5,
     encoder_timesteps: int = 25,
     encoder_rate_threshold_pct: float = 50.0,
+    expected_sampling_frequency_hz: float = 250.0,
+    epoch_tmin: float = 2.0,
+    epoch_tmax: float = 6.0,
+    filter_l_freq_hz: float = 4.0,
+    filter_h_freq_hz: float = 100.0,
+    model_out_features: int = 128,
+    output_evaluation_dir: str | Path | None = None,
+    dataset_name: str = "BNCI2014_001",
+    dataset_path: str | Path | None = None,
     momentum: float = 0.95,
     confidence_threshold: float = 0.8,
     enable_consolidation: bool = True,
@@ -356,6 +411,18 @@ def run_cross_session_sweep(
                 model_threshold=model_threshold,
                 encoder_timesteps=encoder_timesteps,
                 encoder_rate_threshold_pct=encoder_rate_threshold_pct,
+                expected_sampling_frequency_hz=expected_sampling_frequency_hz,
+                epoch_tmin=epoch_tmin,
+                epoch_tmax=epoch_tmax,
+                filter_l_freq_hz=filter_l_freq_hz,
+                filter_h_freq_hz=filter_h_freq_hz,
+                model_out_features=model_out_features,
+                output_evaluation_dir=(
+                    Path(output_evaluation_dir) / f"sub_{subj}" / f"seed_{seed}"
+                    if output_evaluation_dir is not None else None
+                ),
+                dataset_name=dataset_name,
+                dataset_path=dataset_path,
                 momentum=momentum,
                 confidence_threshold=confidence_threshold,
                 enable_consolidation=enable_consolidation,
@@ -420,8 +487,13 @@ def run_cross_session_sweep(
                     / f"phase_a_subject_{run.subject}.pt"
                 ),
                 "evaluation_artifact": str(
-                    manifest_root / f"sub_{run.subject}" / f"seed_{run.seed}"
-                    / f"evaluation_subject_{run.subject}.json"
+                    (
+                        Path(output_evaluation_dir)
+                        if output_evaluation_dir is not None
+                        else manifest_root
+                    )
+                    / f"sub_{run.subject}" / f"seed_{run.seed}"
+                    / f"subject_{run.subject}_seed_{run.seed}.json"
                 ),
             }
             for run in runs

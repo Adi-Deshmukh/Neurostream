@@ -31,6 +31,7 @@ def load_bnci2014_001(
 	tmax: float = 6.0,
 	l_freq: float = 4.0,
 	h_freq: float = 100.0,
+	dataset_path: str | None = None,
 ) -> dict[str, SessionData]:
 	"""Load BNCI2014_001 and return trials grouped by MOABB session.
 
@@ -46,6 +47,8 @@ def load_bnci2014_001(
 		from moabb.datasets import BNCI2014_001
 
 		dataset = BNCI2014_001()
+		if dataset_path is not None:
+			setattr(dataset, "data_path", dataset_path)
 
 	subject_ids = [subjects] if isinstance(subjects, int) else list(subjects)
 	requested_sessions = set(sessions) if sessions is not None else None
