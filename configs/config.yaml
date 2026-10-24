@@ -1,5 +1,46 @@
-# NeuroStream Hydra Root Config
-#
-# This is the top-level configuration entrypoint.
-# It is intended to compose model, data, and subject settings.
-# Fill this file with Hydra defaults and run-time options in the next step.
+data:
+  dataset_name: BNCI2014_001
+  dataset_path: null
+  cache_path: ../data/moabb_cache
+  sampling_frequency_hz: 250.0
+  epoch_tmin: 2.0
+  epoch_tmax: 6.0
+
+preprocessing:
+  filter_l_freq_hz: 4.0
+  filter_h_freq_hz: 100.0
+  normalization: channelwise_zscore_per_trial
+  mode: offline_zero_phase_epoch
+
+encoder:
+  timesteps: 20
+  rate_threshold_pct: 75.0
+  filter_order: 4
+  bands_hz:
+    alpha: [8.0, 13.0]
+    beta: [13.0, 30.0]
+    gamma: [30.0, 100.0]
+
+model:
+  in_features: 66
+  hidden: 256
+  out_features: 128
+  beta: 0.9
+  threshold: 0.5
+
+training:
+  epochs: 50
+  batch_size: 32
+  learning_rate: 0.001
+  validation_fraction: 0.2
+  seed: 42
+
+evaluation:
+  adaptation_momentum: 0.95
+  confidence_threshold: 0.8
+  protocol: static_baseline_prequential_retrospective
+
+output:
+  checkpoint_dir: ../results/checkpoints
+  evaluation_dir: ../results/evaluations
+  log_dir: ../results/logs

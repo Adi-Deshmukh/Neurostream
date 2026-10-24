@@ -10,6 +10,7 @@ from pathlib import Path
 
 from neurostream.evaluation.cross_session_eval import run_cross_session_sweep
 from neurostream.evaluation.metrics import format_metrics_table
+from neurostream.configuration import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,9 @@ def main() -> None:
     parser.add_argument("--enable-consolidation", action="store_true", default=True)
     parser.add_argument("--no-consolidation", action="store_false", dest="enable_consolidation")
     parser.add_argument("--output-csv", default="results/logs/cross_session_sweep.csv")
+    parser.add_argument("--config", default="configs/config.yaml")
     args = parser.parse_args()
+    config = load_config(args.config)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -47,12 +50,13 @@ def main() -> None:
         subjects=subjects,
         seeds=seeds,
         epochs=epochs,
-        batch_size=args.batch_size,
-        learning_rate=args.learning_rate,
-        momentum=args.momentum,
-        confidence_threshold=args.confidence_threshold,
+        batch_size=args.batch_size or config.training_batch_size,
+        learning_rate=args.learning_rate or config.training_learning_rate,
+        momentum=args.momentum or config.adaptation_momentum,
+        confidence_threshold=args.confidence_threshold or config.evaluation_confidence_threshold,
         enable_consolidation=args.enable_consolidation,
         output_csv=output_csv,
+        checkpoint_dir=config.output_checkpoint_dir,
     )
 
     metrics_list = sweep.to_evaluation_metrics()
