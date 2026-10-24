@@ -1,0 +1,52 @@
+{
+  "Name": "BNCI 2014-001 Motor Imagery dataset",
+  "BIDSVersion": "1.9.0",
+  "HEDVersion": "8.4.0",
+  "DatasetType": "derivative",
+  "License": "CC-BY-ND-4.0",
+  "Authors": [
+    "Michael Tangermann",
+    "Klaus-Robert Müller",
+    "Ad Aertsen",
+    "Niels Birbaumer",
+    "Christoph Braun",
+    "Clemens Brunner",
+    "Robert Leeb",
+    "Carsten Mehring",
+    "Kai J. Miller",
+    "Gernot R. Müller-Putz",
+    "Guido Nolte",
+    "Gert Pfurtscheller",
+    "Hubert Preissl",
+    "Gerwin Schalk",
+    "Alois Schlögl",
+    "Carmen Vidaurre",
+    "Stephan Waldert",
+    "Benjamin Blankertz"
+  ],
+  "ReferencesAndLinks": [
+    "http://www.bbci.de/competition/iv/"
+  ],
+  "GeneratedBy": [
+    {
+      "CodeURL": "https://github.com/NeuroTechX/moabb",
+      "Name": "moabb",
+      "Description": "Mother of All BCI Benchmarks",
+      "Version": "1.4.3"
+    }
+  ],
+  "SourceDatasets": [
+    {
+      "DOI": "10.3389/fnins.2012.00055",
+      "URL": "http://www.bbci.de/competition/iv/"
+    }
+  ],
+  "Keywords": [
+    "brain-computer interface",
+    "BCI",
+    "competition"
+  ],
+  "PublicationYear": 2012,
+  "DatasetDOI": "10.82901/nemar.nm000139",
+  "Version": "1.0.2"
+}

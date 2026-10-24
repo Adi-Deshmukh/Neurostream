@@ -67,36 +67,35 @@ st.markdown(
         vertical-align: middle;
     }
     
-    /* Metric Card Styling */
+    /* Theme-adaptive Metric Card Styling */
     div[data-testid="stMetric"] {
-        background-color: #FFFFFF;
-        border: 1px solid #E2E8F0;
+        background-color: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 10px;
         padding: 16px;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
         transition: all 0.2s ease-in-out;
     }
     div[data-testid="stMetric"]:hover {
-        border-color: #CBD5E1;
+        border-color: rgba(148, 163, 184, 0.4);
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08);
     }
     div[data-testid="stMetric"] label {
         font-size: 0.82rem !important;
         font-weight: 600 !important;
-        color: #64748B !important;
         text-transform: uppercase;
         letter-spacing: 0.05em;
+        opacity: 0.85;
     }
     div[data-testid="stMetric"] [data-testid="stMetricValue"] {
         font-size: 1.75rem !important;
         font-weight: 700 !important;
-        color: #0F172A !important;
     }
 
     /* Tab Styling */
     .stTabs [data-baseweb="tab-list"] {
         gap: 10px;
-        border-bottom: 2px solid #E2E8F0;
+        border-bottom: 2px solid rgba(148, 163, 184, 0.2);
         padding-bottom: 4px;
     }
     .stTabs [data-baseweb="tab"] {
@@ -104,7 +103,6 @@ st.markdown(
         font-weight: 600;
         font-size: 0.95rem;
         border-radius: 8px 8px 0 0;
-        color: #64748B;
         transition: all 0.2s;
     }
     .stTabs [aria-selected="true"] {
@@ -115,12 +113,11 @@ st.markdown(
 
     /* Card Panels */
     .content-card {
-        background-color: #FFFFFF;
-        border: 1px solid #E2E8F0;
+        background-color: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 10px;
         padding: 20px;
         margin-bottom: 20px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
     }
     </style>
     """,
@@ -446,8 +443,8 @@ with tab_replay:
                 gridcolor="#F1F5F9",
                 zerolinecolor="#E2E8F0",
             ),
-            plot_bgcolor="#FFFFFF",
-            paper_bgcolor="#FFFFFF",
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
@@ -495,8 +492,8 @@ with tab_replay:
         fig_dyn.update_layout(
             height=340,
             margin=dict(l=10, r=10, t=25, b=10),
-            plot_bgcolor="#FFFFFF",
-            paper_bgcolor="#FFFFFF",
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
             legend=dict(orientation="h", y=1.2, x=0),
         )
         fig_dyn.update_yaxes(gridcolor="#F1F5F9", row=1, col=1)
@@ -507,31 +504,31 @@ with tab_replay:
 
         st.markdown(
             f"""
-            <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px; font-size: 0.90rem;">
-                <div style="font-weight: 700; color: #0F172A; margin-bottom: 8px;">🔍 Active Trial #{current_step} State</div>
+            <div style="background-color: rgba(255, 255, 255, 0.04); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 8px; padding: 14px; font-size: 0.90rem;">
+                <div style="font-weight: 700; margin-bottom: 8px;">🔍 Active Trial #{current_step} State</div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="color: #64748B;">True Motor Imagery:</span>
-                    <span style="font-weight: 600; color: #0F172A;">{sim_data.class_names[current_record.true_label]}</span>
+                    <span style="opacity: 0.7;">True Motor Imagery:</span>
+                    <span style="font-weight: 600;">{sim_data.class_names[current_record.true_label]}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="color: #64748B;">SNN Prediction:</span>
-                    <span style="font-weight: 600; color: {'#059669' if current_record.predicted_label == current_record.true_label else '#EF4444'};">
+                    <span style="opacity: 0.7;">SNN Prediction:</span>
+                    <span style="font-weight: 600; color: {'#10B981' if current_record.predicted_label == current_record.true_label else '#EF4444'};">
                         {sim_data.class_names[current_record.predicted_label]}
                     </span>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="color: #64748B;">Softmax Confidence:</span>
-                    <span style="font-weight: 600; color: #0F172A;">{current_record.confidence:.2%}</span>
+                    <span style="opacity: 0.7;">Softmax Confidence:</span>
+                    <span style="font-weight: 600;">{current_record.confidence:.2%}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="color: #64748B;">Decision:</span>
-                    <span style="font-weight: 600; color: {'#059669' if current_record.accepted else '#64748B'};">
+                    <span style="opacity: 0.7;">Decision:</span>
+                    <span style="font-weight: 600; color: {'#10B981' if current_record.accepted else '#94A3B8'};">
                         {'ADAPTED (P ← EMA)' if current_record.accepted else 'FILTERED (Below Threshold)'}
                     </span>
                 </div>
                 <div style="display: flex; justify-content: space-between;">
-                    <span style="color: #64748B;">Accepted So Far:</span>
-                    <span style="font-weight: 600; color: #0F172A;">{sum(1 for s in sim_data.steps[:current_step] if s.accepted)} / {current_step}</span>
+                    <span style="opacity: 0.7;">Accepted So Far:</span>
+                    <span style="font-weight: 600;">{sum(1 for s in sim_data.steps[:current_step] if s.accepted)} / {current_step}</span>
                 </div>
             </div>
             """,
@@ -581,8 +578,8 @@ with tab_cross_subject:
             yaxis_title="Accuracy (%)",
             barmode="group",
             height=380,
-            plot_bgcolor="#FFFFFF",
-            paper_bgcolor="#FFFFFF",
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
             yaxis=dict(gridcolor="#F1F5F9"),
             legend=dict(orientation="h", y=1.1, x=0),
         )
@@ -602,8 +599,8 @@ with tab_cross_subject:
             title="Generalization Profile Across Train / Validation / Test",
             yaxis_title="Accuracy (%)",
             height=380,
-            plot_bgcolor="#FFFFFF",
-            paper_bgcolor="#FFFFFF",
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
             yaxis=dict(gridcolor="#F1F5F9"),
             legend=dict(orientation="h", y=1.1, x=0),
         )
@@ -661,8 +658,8 @@ with tab_architecture:
             title="Neuron Duty Cycle Distribution",
             height=340,
             margin=dict(l=10, r=10, t=50, b=10),
-            plot_bgcolor="#FFFFFF",
-            paper_bgcolor="#FFFFFF",
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
         )
         st.plotly_chart(fig_donut, width="stretch")
 
@@ -691,8 +688,8 @@ with tab_architecture:
             yaxis_title="Firing Rate (%)",
             height=260,
             margin=dict(l=10, r=10, t=40, b=10),
-            plot_bgcolor="#FFFFFF",
-            paper_bgcolor="#FFFFFF",
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
             yaxis=dict(gridcolor="#F1F5F9", range=[0, 45]),
         )
         st.plotly_chart(fig_layers, width="stretch")

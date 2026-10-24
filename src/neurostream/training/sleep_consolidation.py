@@ -1,4 +1,5 @@
-"""Sleep-phase consolidation mechanism for prototype memory stabilization.
+"""
+Sleep-phase consolidation mechanism for prototype memory stabilization.
 
 During continuous online adaptation, class prototypes drift toward target-session
 distributions, causing catastrophic forgetting of source-session representations.
