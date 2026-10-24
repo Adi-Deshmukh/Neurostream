@@ -131,6 +131,7 @@ def test_cross_session_sweep_with_mock_dataset(tmp_path):
         rows = list(reader)
         assert len(rows) == 1
         assert "subject" in rows[0]
-        assert "post_adaptation_acc" in rows[0]
+        assert "target_prequential_acc" in rows[0]
+        assert "source_accuracy_after_adaptation" in rows[0]
         assert "spike_sparsity" in rows[0]
         assert "consolidation_phases" in rows[0]

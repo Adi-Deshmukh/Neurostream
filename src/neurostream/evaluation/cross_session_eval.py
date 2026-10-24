@@ -4,7 +4,8 @@ Runs the complete lifecycle across subjects and seeds:
 1. Supervised Phase A SNN training on Session 1 -> freezes model weights.
 2. Extracts initial class prototypes from Session 1.
 3. Online Phase B adaptation on Session 2 using frozen momentum/alpha with sleep consolidation.
-4. Measures target accuracy gain, session-1 retention, forgetting, and LIF spike sparsity.
+4. Measures static target baseline, prequential target adaptation, retrospective
+   target diagnostics, explicit source retention, and LIF spike activity.
 5. Aggregates results into a reproducible table and CSV.
 """
 
@@ -42,18 +43,26 @@ class SubjectRunResult:
     seed: int
     phase_a_train_acc: float
     phase_a_val_acc: float
-    phase_a_test_acc: float
-    pre_adaptation_acc: float
-    post_adaptation_acc: float
+    target_static_baseline_acc: float
+    target_prequential_acc: float
+    target_retrospective_acc: float
     adaptation_gain: float
-    initial_retention_acc: float
-    post_retention_acc: float
-    forgetting: float
+    source_accuracy_before_adaptation: float
+    source_accuracy_after_adaptation: float
+    source_retention_delta: float
     spike_sparsity: float
     accepted_trials: int
     total_target_trials: int
     consolidation_phases: int
     consolidation_enabled: bool
+
+    @property
+    def pre_adaptation_acc(self) -> float:
+        return self.target_static_baseline_acc
+
+    @property
+    def post_adaptation_acc(self) -> float:
+        return self.target_prequential_acc
 
 
 @dataclass
@@ -77,13 +86,16 @@ class SweepSummary:
                 EvaluationMetrics(
                     subject=f"S{r.subject}-s{r.seed}",
                     session="cross-session",
-                    pre_adaptation_acc=r.pre_adaptation_acc,
-                    post_adaptation_acc=r.post_adaptation_acc,
+                    pre_adaptation_acc=r.target_static_baseline_acc,
+                    post_adaptation_acc=r.target_prequential_acc,
                     adaptation_gain=r.adaptation_gain,
-                    initial_retention_acc=r.initial_retention_acc,
-                    post_retention_acc=r.post_retention_acc,
-                    forgetting=r.forgetting,
-                    retention_rate=r.post_retention_acc / r.initial_retention_acc if r.initial_retention_acc > 0 else 0.0,
+                    initial_retention_acc=r.source_accuracy_before_adaptation,
+                    post_retention_acc=r.source_accuracy_after_adaptation,
+                    forgetting=-r.source_retention_delta,
+                    retention_rate=(
+                        r.source_accuracy_after_adaptation / r.source_accuracy_before_adaptation
+                        if r.source_accuracy_before_adaptation > 0 else 0.0
+                    ),
                     spike_sparsity=r.spike_sparsity,
                     consolidation_enabled=r.consolidation_enabled,
                     acceptance_rate=r.accepted_trials / r.total_target_trials if r.total_target_trials > 0 else 0.0,
@@ -216,30 +228,28 @@ def run_subject_cross_session(
         confidence_threshold=confidence_threshold,
         batch_size=batch_size,
         source_spikes=train_spikes,
-        source_labels=source_labels,
         enable_consolidation=enable_consolidation,
         consolidation_interval=consolidation_interval,
         sleep_steps=sleep_steps,
         noise_std=noise_std,
         pull_rate=pull_rate,
     )
-    phase_b = score_adaptation(phase_b, target_labels)
+    phase_b = score_adaptation(phase_b, target_labels, source_labels)
 
-    gain = phase_b.after_accuracy - phase_b.before_accuracy
-    forget = phase_a_eval["prototype_accuracy"] - phase_b.retention_accuracy
+    gain = phase_b.prequential_accuracy - phase_b.static_baseline_accuracy
 
     return SubjectRunResult(
         subject=subject,
         seed=seed,
         phase_a_train_acc=phase_a.train_accuracy,
         phase_a_val_acc=phase_a.validation_accuracy,
-        phase_a_test_acc=float(phase_a_eval["prototype_accuracy"]),
-        pre_adaptation_acc=phase_b.before_accuracy,
-        post_adaptation_acc=phase_b.after_accuracy,
+        target_static_baseline_acc=phase_b.static_baseline_accuracy,
+        target_prequential_acc=phase_b.prequential_accuracy,
+        target_retrospective_acc=phase_b.retrospective_accuracy,
         adaptation_gain=gain,
-        initial_retention_acc=float(phase_a_eval["prototype_accuracy"]),
-        post_retention_acc=phase_b.retention_accuracy,
-        forgetting=forget,
+        source_accuracy_before_adaptation=phase_b.source_accuracy_before_adaptation,
+        source_accuracy_after_adaptation=phase_b.source_accuracy_after_adaptation,
+        source_retention_delta=phase_b.source_retention_delta,
         spike_sparsity=mean_sparsity,
         accepted_trials=phase_b.accepted_trials,
         total_target_trials=test_spikes.shape[-1],
@@ -301,8 +311,8 @@ def run_cross_session_sweep(
     pre_scores = [r.pre_adaptation_acc for r in runs]
     post_scores = [r.post_adaptation_acc for r in runs]
     gain_scores = [r.adaptation_gain for r in runs]
-    ret_scores = [r.post_retention_acc for r in runs]
-    forget_scores = [r.forgetting for r in runs]
+    ret_scores = [r.source_accuracy_after_adaptation for r in runs]
+    forget_scores = [-r.source_retention_delta for r in runs]
     sparse_scores = [r.spike_sparsity for r in runs]
 
     mean_pre = float(np.mean(pre_scores))

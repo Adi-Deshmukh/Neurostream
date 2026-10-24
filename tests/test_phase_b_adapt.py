@@ -67,6 +67,22 @@ def test_evaluation_labels_do_not_change_adaptation():
     torch.testing.assert_close(first.prequential_predictions, second.prequential_predictions)
 
 
+def test_protocol_predictions_have_order_and_explicit_timing():
+    torch.manual_seed(6)
+    model = SNNFeatureExtractor(in_features=6, hidden=8, out_features=4)
+    spikes = (np.random.default_rng(6).random((6, 5, 6)) > 0.7).astype(np.uint8)
+    prototypes = torch.randn(4, 4)
+    result = adapt_target_session(model, prototypes, spikes, confidence_threshold=0.0)
+
+    assert result.static_baseline_predictions.shape == (6,)
+    assert result.prequential_predictions.shape == (6,)
+    assert result.retrospective_predictions.shape == (6,)
+    with torch.no_grad():
+        first_feature = model(torch.as_tensor(spikes[:, :, :1], dtype=torch.float32))
+        expected_first = PrototypeMemory(prototypes).classify(first_feature)[0]
+    assert result.prequential_predictions[0] == expected_first
+
+
 def test_labelled_calibration_keeps_evaluation_trials_separate():
     torch.manual_seed(4)
     model = SNNFeatureExtractor(in_features=6, hidden=8, out_features=4)

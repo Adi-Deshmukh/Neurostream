@@ -13,22 +13,41 @@ from neurostream.models.snn_feature_extractor import SNNFeatureExtractor
 
 @dataclass
 class PhaseBResult:
-	"""Metrics from a target-session adaptation run."""
+	"""Protocol-specific outputs from a target-session adaptation run."""
 
-	before_accuracy: float
-	after_accuracy: float
 	accepted_trials: int
 	prototypes: torch.Tensor
 	calibration_trials: int = 0
 	evaluation_trials: int = 0
-	retention_accuracy: float = float("nan")
 	acceptance_rate: float = float("nan")
 	consolidation_phases: int = 0
 	drift_before_after: float = float("nan")
+	static_baseline_predictions: torch.Tensor | None = None
 	prequential_predictions: torch.Tensor | None = None
 	retrospective_predictions: torch.Tensor | None = None
+	source_predictions_before_adaptation: torch.Tensor | None = None
+	source_predictions_after_adaptation: torch.Tensor | None = None
+	static_baseline_accuracy: float = float("nan")
 	prequential_accuracy: float = float("nan")
 	retrospective_accuracy: float = float("nan")
+	source_accuracy_before_adaptation: float = float("nan")
+	source_accuracy_after_adaptation: float = float("nan")
+	source_retention_delta: float = float("nan")
+
+	@property
+	def before_accuracy(self) -> float:
+		"""Compatibility alias for prequential accuracy."""
+		return self.prequential_accuracy
+
+	@property
+	def after_accuracy(self) -> float:
+		"""Compatibility alias for retrospective diagnostic accuracy."""
+		return self.retrospective_accuracy
+
+	@property
+	def retention_accuracy(self) -> float:
+		"""Compatibility alias for post-adaptation source accuracy."""
+		return self.source_accuracy_after_adaptation
 
 
 def adapt_target_session(
@@ -41,7 +60,6 @@ def adapt_target_session(
 	temperature: float = 0.1,
 	batch_size: int = 32,
 	source_spikes: np.ndarray | torch.Tensor | None = None,
-	source_labels: np.ndarray | torch.Tensor | None = None,
 	enable_consolidation: bool = False,
 	consolidation_interval: int = 50,
 	sleep_steps: int = 5,
@@ -53,6 +71,8 @@ def adapt_target_session(
 	Each target trial is predicted first, then optionally used with its
 	pseudo-label for the prototype update. No evaluation labels enter this
 	operational path. The SNN parameters are never modified.
+	If source trials are supplied, predictions are recorded before and after
+	adaptation; source labels must be supplied later to ``score_adaptation``.
 
 	When ``enable_consolidation=True``, a gradient-free sleep-phase consolidation
 	mechanism runs every ``consolidation_interval`` adaptation steps, preventing
@@ -94,6 +114,23 @@ def adapt_target_session(
 			feature = model(spikes[:, :, trial_index:trial_index + 1])
 			features.append(feature)
 		features = torch.cat(features, dim=0)
+		static_baseline_predictions, _ = memory.predict(features, temperature)
+		source_features = None
+		source_predictions_before = None
+		if source_spikes is not None:
+			source_tensor = torch.as_tensor(source_spikes, dtype=torch.float32)
+			if source_tensor.ndim != 3 or source_tensor.shape[:2] != spikes.shape[:2]:
+				raise ValueError("source and target spikes must have matching channel and timestep dimensions")
+			if source_tensor.shape[-1] < 1 or not torch.isfinite(source_tensor).all():
+				raise ValueError("source spikes must be non-empty and finite")
+			source_features = torch.cat(
+				[
+					model(source_tensor[:, :, start:start + batch_size])
+					for start in range(0, source_tensor.shape[-1], batch_size)
+				],
+				dim=0,
+			)
+			source_predictions_before, _ = memory.predict(source_features, temperature)
 		prequential_predictions = []
 		accepted_trials = 0
 		consolidation_count = 0
@@ -114,24 +151,9 @@ def adapt_target_session(
 						consolidation_count += 1
 
 		retrospective_predictions, _ = memory.predict(features, temperature)
-	retention_accuracy = float("nan")
-	if source_spikes is not None and source_labels is not None:
-		source_tensor = torch.as_tensor(source_spikes, dtype=torch.float32)
-		source_y = torch.as_tensor(np.asarray(source_labels).reshape(-1), dtype=torch.long)
-		if source_tensor.ndim != 3 or source_tensor.shape[:2] != spikes.shape[:2]:
-			raise ValueError("source and target spikes must have matching channel and timestep dimensions")
-		if source_tensor.shape[-1] != source_y.numel() or not torch.isfinite(source_tensor).all():
-			raise ValueError("source spikes and labels must be non-empty, finite, and aligned")
-		with torch.no_grad():
-			source_features = torch.cat(
-				[
-					model(source_tensor[:, :, start:start + batch_size])
-					for start in range(0, source_tensor.shape[-1], batch_size)
-				],
-				dim=0,
-			)
-			retention, _ = memory.predict(source_features, temperature)
-			retention_accuracy = float((retention == source_y).float().mean())
+	source_predictions_after = None
+	if source_features is not None:
+		source_predictions_after, _ = memory.predict(source_features, temperature)
 
 	drift_val = float("nan")
 	if consolidator is not None:
@@ -139,22 +161,27 @@ def adapt_target_session(
 		drift_val = float(loss.item())
 
 	return PhaseBResult(
-		before_accuracy=float("nan"),
-		after_accuracy=float("nan"),
 		accepted_trials=accepted_trials,
 		prototypes=memory.prototypes,
-		retention_accuracy=retention_accuracy,
 		acceptance_rate=accepted_trials / features.shape[0],
 		consolidation_phases=consolidation_count,
 		drift_before_after=drift_val,
+		static_baseline_predictions=static_baseline_predictions.cpu(),
 		prequential_predictions=torch.as_tensor(prequential_predictions, dtype=torch.long),
 		retrospective_predictions=retrospective_predictions.cpu(),
+		source_predictions_before_adaptation=(
+			source_predictions_before.cpu() if source_predictions_before is not None else None
+		),
+		source_predictions_after_adaptation=(
+			source_predictions_after.cpu() if source_predictions_after is not None else None
+		),
 	)
 
 
 def score_adaptation(
 	result: PhaseBResult,
 	target_labels: np.ndarray | torch.Tensor,
+	source_labels: np.ndarray | torch.Tensor | None = None,
 ) -> PhaseBResult:
 	"""Score recorded prequential and retrospective predictions.
 
@@ -162,16 +189,41 @@ def score_adaptation(
 	evaluation labels cannot alter prototype updates or predictions.
 	"""
 	labels = torch.as_tensor(np.asarray(target_labels).reshape(-1), dtype=torch.long)
-	if result.prequential_predictions is None or result.retrospective_predictions is None:
+	if (
+		result.static_baseline_predictions is None
+		or result.prequential_predictions is None
+		or result.retrospective_predictions is None
+	):
 		raise ValueError("adaptation result does not contain recorded predictions")
 	if labels.numel() != result.prequential_predictions.numel():
 		raise ValueError("target labels must match the number of recorded predictions")
-	pre = float((result.prequential_predictions == labels).float().mean())
-	retro = float((result.retrospective_predictions == labels).float().mean())
-	result.before_accuracy = pre
-	result.after_accuracy = retro
-	result.prequential_accuracy = pre
-	result.retrospective_accuracy = retro
+	result.static_baseline_accuracy = float(
+		(result.static_baseline_predictions == labels).float().mean()
+	)
+	result.prequential_accuracy = float(
+		(result.prequential_predictions == labels).float().mean()
+	)
+	result.retrospective_accuracy = float(
+		(result.retrospective_predictions == labels).float().mean()
+	)
+	if source_labels is not None:
+		source_y = torch.as_tensor(np.asarray(source_labels).reshape(-1), dtype=torch.long)
+		if (
+			result.source_predictions_before_adaptation is None
+			or result.source_predictions_after_adaptation is None
+			or source_y.numel() != result.source_predictions_before_adaptation.numel()
+		):
+			raise ValueError("source labels must match recorded source predictions")
+		result.source_accuracy_before_adaptation = float(
+			(result.source_predictions_before_adaptation == source_y).float().mean()
+		)
+		result.source_accuracy_after_adaptation = float(
+			(result.source_predictions_after_adaptation == source_y).float().mean()
+		)
+		result.source_retention_delta = (
+			result.source_accuracy_after_adaptation
+			- result.source_accuracy_before_adaptation
+		)
 	return result
 
 
@@ -228,10 +280,14 @@ def calibrate_target_session(
 		after, _ = memory.predict(features[evaluation_indices], temperature)
 		after_accuracy = float((after == labels[evaluation_indices]).float().mean())
 	return PhaseBResult(
-		before_accuracy=before_accuracy,
-		after_accuracy=after_accuracy,
 		accepted_trials=calibration_indices.numel(),
 		prototypes=memory.prototypes,
 		calibration_trials=calibration_indices.numel(),
 		evaluation_trials=evaluation_indices.numel(),
+		static_baseline_accuracy=before_accuracy,
+		prequential_accuracy=after_accuracy,
+		retrospective_accuracy=after_accuracy,
+		static_baseline_predictions=before.cpu(),
+		prequential_predictions=after.cpu(),
+		retrospective_predictions=after.cpu(),
 	)

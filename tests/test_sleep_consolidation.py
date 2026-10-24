@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from neurostream.models.snn_feature_extractor import SNNFeatureExtractor
-from neurostream.training.phase_b_adapt import adapt_target_session
+from neurostream.training.phase_b_adapt import adapt_target_session, score_adaptation
 from neurostream.training.sleep_consolidation import SleepConsolidator, SleepConsolidationStepResult
 
 
@@ -123,6 +123,7 @@ def test_adapt_target_session_with_consolidation():
         noise_std=0.05,
         pull_rate=0.5,
     )
+    result = score_adaptation(result, labels)
 
     # Check model weights remained frozen
     for k, v in model.state_dict().items():
@@ -166,11 +167,11 @@ def test_consolidation_ablation_improves_retention():
         s1_prototypes.clone(),
         target_spikes,
         source_spikes=source_spikes,
-        source_labels=source_labels,
         confidence_threshold=0.0,
         momentum=0.8,  # aggressive update to induce drift
         enable_consolidation=False,
     )
+    res_off = score_adaptation(res_off, target_labels, source_labels)
 
     # Run adaptation with consolidation (ON)
     res_on = adapt_target_session(
@@ -178,7 +179,6 @@ def test_consolidation_ablation_improves_retention():
         s1_prototypes.clone(),
         target_spikes,
         source_spikes=source_spikes,
-        source_labels=source_labels,
         confidence_threshold=0.0,
         momentum=0.8,
         enable_consolidation=True,
@@ -187,6 +187,7 @@ def test_consolidation_ablation_improves_retention():
         noise_std=0.05,
         pull_rate=0.8,
     )
+    res_on = score_adaptation(res_on, target_labels, source_labels)
 
     # Compute drift of resulting prototypes from s1_prototypes
     drift_off = 1.0 - torch.nn.functional.cosine_similarity(res_off.prototypes, s1_prototypes, dim=-1).mean().item()

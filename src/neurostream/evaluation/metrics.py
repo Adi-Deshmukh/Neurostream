@@ -206,14 +206,15 @@ class EvaluationMetrics:
         consolidation_enabled: bool = False,
     ) -> EvaluationMetrics:
         """Create structured metrics from Phase A and Phase B results."""
-        pre_acc = getattr(phase_b_result, "before_accuracy", 0.0)
-        post_acc = getattr(phase_b_result, "after_accuracy", 0.0)
-        post_ret = getattr(phase_b_result, "retention_accuracy", float("nan"))
+        pre_acc = getattr(phase_b_result, "static_baseline_accuracy", float("nan"))
+        post_acc = getattr(phase_b_result, "prequential_accuracy", float("nan"))
+        source_before = getattr(phase_b_result, "source_accuracy_before_adaptation", float("nan"))
+        source_after = getattr(phase_b_result, "source_accuracy_after_adaptation", float("nan"))
         acc_rate = getattr(phase_b_result, "acceptance_rate", float("nan"))
 
-        gain = adaptation_gain(pre_acc, post_acc)
-        forget_val = forgetting(phase_a_test_acc, post_ret) if not np.isnan(post_ret) else float("nan")
-        ret_rate_val = retention_rate(phase_a_test_acc, post_ret) if not np.isnan(post_ret) else float("nan")
+        gain = adaptation_gain(pre_acc, post_acc) if not np.isnan(pre_acc + post_acc) else float("nan")
+        forget_val = forgetting(source_before, source_after) if not np.isnan(source_after) else float("nan")
+        ret_rate_val = retention_rate(source_before, source_after) if not np.isnan(source_after) else float("nan")
 
         return cls(
             subject=subject,
@@ -221,8 +222,8 @@ class EvaluationMetrics:
             pre_adaptation_acc=pre_acc,
             post_adaptation_acc=post_acc,
             adaptation_gain=gain,
-            initial_retention_acc=phase_a_test_acc,
-            post_retention_acc=post_ret,
+            initial_retention_acc=source_before,
+            post_retention_acc=source_after,
             forgetting=forget_val,
             retention_rate=ret_rate_val,
             spike_sparsity=spike_sparsity,

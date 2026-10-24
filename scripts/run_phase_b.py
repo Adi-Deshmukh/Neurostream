@@ -86,20 +86,22 @@ def main() -> None:
 		result = adapt_target_session(
 			model, prototypes, test_spikes,
 			momentum=args.momentum, confidence_threshold=args.confidence_threshold,
-			batch_size=args.batch_size, source_spikes=train_spikes,
-			source_labels=train_labels,
+			batch_size=args.batch_size, 			source_spikes=train_spikes,
 			enable_consolidation=args.enable_consolidation,
 			consolidation_interval=args.consolidation_interval,
 			sleep_steps=args.sleep_steps,
 			noise_std=args.noise_std,
 			pull_rate=args.pull_rate,
 		)
-		result = score_adaptation(result, test_labels)
+		result = score_adaptation(result, test_labels, train_labels)
 	print(f"subject={args.subject} session={test_name}")
 	print(f"consolidation_enabled={args.enable_consolidation}")
-	print(f"before_accuracy={result.before_accuracy:.2%}")
-	print(f"after_accuracy={result.after_accuracy:.2%}")
-	print(f"session_1_retention={result.retention_accuracy:.2%}")
+	print(f"target_static_baseline_accuracy={result.static_baseline_accuracy:.2%}")
+	print(f"target_prequential_accuracy={result.prequential_accuracy:.2%}")
+	print(f"target_retrospective_accuracy={result.retrospective_accuracy:.2%}")
+	print(f"source_accuracy_before_adaptation={result.source_accuracy_before_adaptation:.2%}")
+	print(f"source_accuracy_after_adaptation={result.source_accuracy_after_adaptation:.2%}")
+	print(f"source_retention_delta={result.source_retention_delta:+.2%}")
 	print(f"accepted_trials={result.accepted_trials}/{test_spikes.shape[-1]}")
 	print(f"acceptance_rate={result.acceptance_rate:.2%}")
 	if result.consolidation_phases:
