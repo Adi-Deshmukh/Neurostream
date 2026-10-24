@@ -140,3 +140,100 @@ class TestInputValidation:
     def test_input_validation_1d(self):
         with pytest.raises(ValueError, match="ndim"):
             encode(np.zeros((1000,)), sfreq=SFREQ)
+
+
+# =============================================================================
+# New tests covering calibration-aware API (fit_encoder / apply_encoder)
+# =============================================================================
+
+from neurostream.data.spike_encoder import (
+    EncoderCalibration,
+    apply_encoder,
+    fit_encoder,
+)
+
+
+class TestFitEncoder:
+    """fit_encoder must produce per-channel thresholds from training data only."""
+
+    def test_returns_calibration_object(self, synthetic_epochs):
+        cal = fit_encoder(synthetic_epochs, sfreq=SFREQ, n_timesteps=N_TIMESTEPS)
+        assert isinstance(cal, EncoderCalibration)
+
+    def test_threshold_shape(self, synthetic_epochs):
+        cal = fit_encoder(synthetic_epochs, sfreq=SFREQ, n_timesteps=N_TIMESTEPS)
+        assert cal.alpha_thresholds.shape == (1, N_CHANNELS, 1)
+        assert cal.beta_thresholds.shape  == (1, N_CHANNELS, 1)
+
+    def test_calibration_stores_sfreq_and_meta(self, synthetic_epochs):
+        cal = fit_encoder(synthetic_epochs, sfreq=SFREQ, n_timesteps=N_TIMESTEPS,
+                          rate_threshold_pct=60.0)
+        assert cal.sfreq == SFREQ
+        assert cal.n_timesteps == N_TIMESTEPS
+        assert cal.rate_threshold_pct == 60.0
+
+    def test_invalid_band_raises(self):
+        """If the dataset sfreq is so low that alpha >= Nyquist-2, raise."""
+        rng = np.random.default_rng(0)
+        tiny = rng.standard_normal((4, 5, 200)).astype(np.float32)
+        with pytest.raises(ValueError, match="entirely above Nyquist"):
+            # sfreq=20 Hz → Nyquist=10 Hz → alpha (8–13 Hz) → effective_hi=8 Hz → 8>=8
+            fit_encoder(tiny, sfreq=20.0)
+
+
+class TestApplyEncoder:
+    """apply_encoder must use pre-fitted thresholds and never re-calibrate."""
+
+    def test_output_shape_matches_encode(self, synthetic_epochs):
+        cal = fit_encoder(synthetic_epochs, sfreq=SFREQ, n_timesteps=N_TIMESTEPS)
+        result = apply_encoder(synthetic_epochs, cal)
+        assert result.spikes.shape == (N_CHANNELS * N_BANDS, N_TIMESTEPS, N_TRIALS)
+
+    def test_output_is_binary(self, synthetic_epochs):
+        cal = fit_encoder(synthetic_epochs, sfreq=SFREQ, n_timesteps=N_TIMESTEPS)
+        result = apply_encoder(synthetic_epochs, cal)
+        assert set(np.unique(result.spikes)).issubset({0, 1})
+
+    def test_thresholds_not_affected_by_test_data(self, synthetic_epochs):
+        """Different test batches with different amplitude scales must not shift
+        spike rates when the calibration is held fixed."""
+        cal = fit_encoder(synthetic_epochs, sfreq=SFREQ, n_timesteps=N_TIMESTEPS)
+
+        rng = np.random.default_rng(77)
+        # Amplified test batch — would inflate thresholds if re-fitted.
+        big_test = (rng.standard_normal((N_TRIALS, N_CHANNELS, 1000)) * 10.0).astype(np.float32)
+        # Small-amplitude test batch — would shrink thresholds if re-fitted.
+        small_test = (rng.standard_normal((N_TRIALS, N_CHANNELS, 1000)) * 0.1).astype(np.float32)
+
+        result_big   = apply_encoder(big_test,   cal)
+        result_small = apply_encoder(small_test, cal)
+
+        # Big amplitudes should produce MORE spikes (power > fixed threshold).
+        # Small amplitudes should produce FEWER spikes.
+        assert result_big.mean_firing_rate > result_small.mean_firing_rate, (
+            "Pre-fixed thresholds must produce higher firing rate for louder signals"
+        )
+
+    def test_gamma_ttfs_still_one_spike_per_trial(self, synthetic_epochs):
+        cal = fit_encoder(synthetic_epochs, sfreq=SFREQ, n_timesteps=N_TIMESTEPS)
+        result = apply_encoder(synthetic_epochs, cal)
+        gamma_start = N_CHANNELS * 2
+        gamma_spikes = result.spikes[gamma_start:, :, :]  # (22, 25, N)
+        spikes_per_trial_channel = gamma_spikes.sum(axis=1)
+        assert np.all(spikes_per_trial_channel == 1)
+
+
+class TestNyquistValidation:
+    """_validate_bands must correctly check each band against Nyquist."""
+
+    def test_250hz_all_bands_pass(self, synthetic_epochs):
+        """250 Hz is the BNCI2014-001 default — all bands must be accepted."""
+        # No exception expected
+        cal = fit_encoder(synthetic_epochs, sfreq=250.0)
+        assert cal is not None
+
+    def test_gamma_clamped_but_no_error_at_128hz(self, synthetic_epochs):
+        """At 128 Hz (Nyquist=64 Hz), gamma upper edge is clamped, not an error."""
+        # gamma (30–100 Hz): effective_hi = min(100, 62) = 62 Hz > 30 Hz → valid
+        cal = fit_encoder(synthetic_epochs, sfreq=128.0)
+        assert cal is not None

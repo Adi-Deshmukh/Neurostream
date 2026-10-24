@@ -31,6 +31,7 @@ class PhaseAResult:
 	prototype_path: Path | None
 	linear_head_test_accuracy: float | None = None
 	linear_head_train_accuracy: float | None = None
+	encoder_calibration: object | None = None  # EncoderCalibration | None
 
 
 def _as_spike_tensor(spikes: np.ndarray | torch.Tensor) -> torch.Tensor:
@@ -258,7 +259,7 @@ def _linear_head_comparison(
 	encoder.eval()
 	with torch.no_grad():
 		train_accuracy = _accuracy(classifier(encoder(train_x)).argmax(dim=1), train_y)
-		test_accuracy = _accuracy(classifier(encoder(test_x)).argmax(dim=1), test_y)
+		test_accuracy  = _accuracy(classifier(encoder(test_x)).argmax(dim=1),  test_y)
 	return train_accuracy, test_accuracy
 
 
@@ -281,12 +282,21 @@ def train_phase_a(
 	model: SNNFeatureExtractor | None = None,
 	checkpoint_dir: str | Path = "results/checkpoints",
 	device: torch.device | str = "cpu",
+	encoder_calibration: object | None = None,  # EncoderCalibration | None
 ) -> PhaseAResult:
 	"""Train Phase A and save the frozen extractor and initial prototypes.
 
 	Inputs use the spike encoder layout ``(channels, timesteps, trials)``.
 	The labels are mapped to consecutive class indices for CrossEntropyLoss;
 	the original sorted label values are returned in ``label_values``.
+
+	Parameters
+	----------
+	encoder_calibration : EncoderCalibration | None
+		Rate-encoding thresholds produced by ``fit_encoder()`` on the training
+		split.  When supplied the calibration is serialised into the checkpoint
+		so that downstream code can apply identical thresholds to validation,
+		test, and online Session 2 data via ``apply_encoder()``.
 	"""
 	if epochs < 1 or n_classes < 2 or batch_size < 1:
 		raise ValueError("epochs, n_classes, and batch_size must be positive")
@@ -294,7 +304,7 @@ def train_phase_a(
 		raise ValueError("augmentation_probability must be in [0, 1)")
 	_set_seed(seed)
 	train_x = _as_spike_tensor(train_spikes).to(device)
-	test_x = _as_spike_tensor(test_spikes).to(device)
+	test_x  = _as_spike_tensor(test_spikes).to(device)
 	train_y, label_values = _encode_labels(train_labels)
 	if len(label_values) != n_classes:
 		raise ValueError(
@@ -319,7 +329,7 @@ def train_phase_a(
 	network = model or SNNFeatureExtractor(in_features=train_x.shape[0])
 	network.to(device)
 	initial_state = {name: value.detach().clone() for name, value in network.state_dict().items()}
-	
+
 	losses, train_accuracy = _prototype_training(
 		network, fit_x, fit_y, n_classes=n_classes, epochs=epochs,
 		learning_rate=learning_rate, temperature=temperature, batch_size=batch_size,
@@ -345,9 +355,9 @@ def train_phase_a(
 	network.eval()
 	with torch.no_grad():
 		final_prototypes = _class_prototypes(network(fit_x), fit_y, n_classes)
-		test_features = network(test_x)
-		predictions = prototype_logits(test_features, final_prototypes, temperature).argmax(dim=1)
-		test_accuracy = float((predictions == test_y).float().mean().cpu())
+		test_features    = network(test_x)
+		predictions      = prototype_logits(test_features, final_prototypes, temperature).argmax(dim=1)
+		test_accuracy    = float((predictions == test_y).float().mean().cpu())
 
 	for parameter in network.parameters():
 		parameter.requires_grad_(False)
@@ -356,7 +366,22 @@ def train_phase_a(
 	output_dir = Path(checkpoint_dir)
 	output_dir.mkdir(parents=True, exist_ok=True)
 	checkpoint_path = output_dir / f"phase_a_subject_{subject}.pt"
-	prototype_path = output_dir / f"prototypes_subject_{subject}.pt"
+	prototype_path  = output_dir / f"prototypes_subject_{subject}.pt"
+
+	# Serialise encoder calibration so val/test/online inference re-uses the
+	# exact same per-channel thresholds that were fitted on training data.
+	calibration_payload: dict | None = None
+	if encoder_calibration is not None:
+		from neurostream.data.spike_encoder import EncoderCalibration
+		if isinstance(encoder_calibration, EncoderCalibration):
+			calibration_payload = {
+				"alpha_thresholds": encoder_calibration.alpha_thresholds,
+				"beta_thresholds":  encoder_calibration.beta_thresholds,
+				"sfreq":            encoder_calibration.sfreq,
+				"n_timesteps":      encoder_calibration.n_timesteps,
+				"rate_threshold_pct": encoder_calibration.rate_threshold_pct,
+			}
+
 	torch.save(
 		{
 			"model_state_dict": network.state_dict(),
@@ -370,6 +395,7 @@ def train_phase_a(
 			"linear_head_train_accuracy": linear_train_accuracy,
 			"label_values": label_values.tolist(),
 			"feature_dim": network.out_features,
+			"encoder_calibration": calibration_payload,
 		},
 		checkpoint_path,
 	)
@@ -396,6 +422,7 @@ def train_phase_a(
 		prototype_path=prototype_path,
 		linear_head_test_accuracy=linear_test_accuracy,
 		linear_head_train_accuracy=linear_train_accuracy,
+		encoder_calibration=encoder_calibration,
 	)
 
 
@@ -418,20 +445,42 @@ def train_subject(
 	validation_fraction: float = 0.2,
 	device: torch.device | str = "cpu",
 ) -> PhaseAResult:
-	"""Load, encode, and train one MOABB subject end to end."""
+	"""Load, encode, and train one MOABB subject end to end.
+
+	Calibration is fitted exclusively on the training-session data and
+	the fitted thresholds are applied (without re-fitting) to the held-out
+	test session.  The true sampling frequency is read from the raw MOABB
+	object so the encoder never relies on the hard-coded 250 Hz default.
+	"""
 	from neurostream.data.loader import load_bnci2014_001
-	from neurostream.data.spike_encoder import encode
+	from neurostream.data.spike_encoder import fit_encoder, apply_encoder
 
 	sessions = load_bnci2014_001(subjects=subject)
 	train_name = next((name for name in sessions if "train" in name.lower()), None)
-	test_name = next((name for name in sessions if "test" in name.lower()), None)
+	test_name  = next((name for name in sessions if "test"  in name.lower()), None)
 	if train_name is None or test_name is None:
 		raise ValueError(f"could not identify train/test sessions: {list(sessions)}")
 
 	train_session = sessions[train_name]
-	test_session = sessions[test_name]
-	train_encoded = encode(train_session.X)
-	test_encoded = encode(test_session.X)
+	test_session  = sessions[test_name]
+
+	# Use the true sampling frequency from the raw data — never hard-code 250 Hz.
+	train_sfreq = train_session.sfreq
+	test_sfreq  = test_session.sfreq
+	if abs(train_sfreq - test_sfreq) > 1e-3:
+		logger.warning(
+			"Train session sfreq (%.1f Hz) != test session sfreq (%.1f Hz). "
+			"Using train sfreq for encoder calibration.",
+			train_sfreq, test_sfreq,
+		)
+
+	# Step 1: fit calibration thresholds on training data ONLY.
+	calibration = fit_encoder(train_session.X, sfreq=train_sfreq)
+
+	# Step 2: apply pre-fitted thresholds to both splits (no re-fitting on test).
+	train_encoded = apply_encoder(train_session.X, calibration)
+	test_encoded  = apply_encoder(test_session.X,  calibration)
+
 	_set_seed(seed)
 	model = SNNFeatureExtractor(
 		in_features=train_encoded.spikes.shape[0], hidden=hidden
@@ -452,4 +501,5 @@ def train_subject(
 		validation_fraction=validation_fraction,
 		checkpoint_dir=checkpoint_dir,
 		device=device,
+		encoder_calibration=calibration,
 	)

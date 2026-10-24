@@ -13,6 +13,8 @@ class SessionData:
 	X: np.ndarray
 	y: np.ndarray
 	metadata: list[dict[str, Any]]
+	sfreq: float = 250.0
+	"""True sampling frequency in Hz, read from ``raw.info["sfreq"]``."""
 
 
 def load_bnci2014_001(
@@ -29,6 +31,11 @@ def load_bnci2014_001(
 
 	``dataset`` may be a MOABB-compatible object, which keeps fixture tests
 	independent of network downloads.
+
+	Each returned :class:`SessionData` carries the true ``sfreq`` extracted
+	from the first run's MNE ``Raw`` object.  All runs in one session must
+	share the same sampling frequency; a :exc:`ValueError` is raised if they
+	differ.
 	"""
 	if dataset is None:
 		from moabb.datasets import BNCI2014_001
@@ -51,7 +58,19 @@ def load_bnci2014_001(
 	result: dict[str, SessionData] = {}
 	for session_name, raw_runs in grouped.items():
 		arrays, labels, metadata = [], [], []
+		session_sfreq: float | None = None
 		for raw, subject_id, run_name in raw_runs:
+			# Extract the true sampling frequency from every run and confirm
+			# they are identical within this session.
+			run_sfreq = float(raw.info["sfreq"])
+			if session_sfreq is None:
+				session_sfreq = run_sfreq
+			elif abs(run_sfreq - session_sfreq) > 1e-3:
+				raise ValueError(
+					f"Session '{session_name}' contains runs with mismatched "
+					f"sampling frequencies: {session_sfreq} Hz vs {run_sfreq} Hz."
+				)
+
 			X, y, run_metadata = preprocess_session(
 				raw, tmin=tmin, tmax=tmax, l_freq=l_freq, h_freq=h_freq
 			)
@@ -65,6 +84,7 @@ def load_bnci2014_001(
 			X=np.concatenate(arrays, axis=0).astype(np.float32, copy=False),
 			y=np.concatenate(labels, axis=0),
 			metadata=metadata,
+			sfreq=session_sfreq if session_sfreq is not None else 250.0,
 		)
 	return result
 
