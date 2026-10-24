@@ -11,7 +11,7 @@
 ## 🚀 Key Architectural Contributions
 
 1. **Zero Raw-Data Storage Privacy**: Once Session 1 training completes, raw EEG signals are permanently discarded. During Session 2 streaming, catastrophic forgetting is mitigated by generating synthetic noisy feature vectors ($\tilde{P} = P_{\text{snapshot}} + \mathcal{N}(0, \sigma^2 I)$) around stored prototype snapshots.
-2. **Orders-of-Magnitude Neuromorphic Efficiency**: Evaluated via forward hooks on LIF layers. Neurons remain silent during **>92% of operational timesteps**, demanding zero dynamic power on event-driven neuromorphic processors (Intel Loihi 2, SynSense Xylo).
+2. **Measured Spike Activity**: Forward hooks report LIF firing rates and neuron-timestep activity for the configured model and workload. These measurements are not direct hardware-energy measurements.
 3. **Fixed-Manifold 2D Reference**: High-dimensional feature trajectories are stably projected into an invariant Session 1 basis (PCA/UMAP), eliminating coordinate jitter during live streaming adaptation.
 4. **Frozen Synaptic Weights**: Synaptic weights $\Theta$ are frozen after Phase A, eliminating computationally expensive online backpropagation on edge devices.
 
@@ -129,7 +129,7 @@ Displays genuine experimental results loaded directly from our 9 trained checkpo
 
 ---
 
-### 5. Tab 3: ⚡ Neuromorphic Energy & Sparsity
+### 5. Tab 3: ⚡ Spike Activity & Sparsity
 
 Validates the neuromorphic hardware claims:
 - **Duty Cycle Donut Chart**: Shows the exact ratio of **Silent Neurons (92.06%)** vs. **Active Spiking Neurons (7.94%)**.
@@ -138,7 +138,7 @@ Validates the neuromorphic hardware claims:
   - **LIF Layer 1 (FC-256)**: $11.25\%$ mean firing rate.
   - **LIF Layer 2 (FC-128)**: $1.33\%$ mean firing rate.
   - **Aggregate Network Sparsity**: **$7.94\%$**.
-- **Theoretical Explanation**: Explains why dense matrix multiplications on standard GPUs consume $\mathcal{O}(B \cdot T \cdot M \cdot N)$ power, whereas event-driven neuromorphic silicon consumes dynamic energy only when a spike arrives.
+- **Measurement scope**: Reports observed spike activity only. Energy, latency, or hardware savings require a defined device, workload, measurement protocol, and baseline.
 
 ---
 

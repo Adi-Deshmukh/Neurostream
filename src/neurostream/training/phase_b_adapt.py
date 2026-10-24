@@ -25,13 +25,16 @@ class PhaseBResult:
 	acceptance_rate: float = float("nan")
 	consolidation_phases: int = 0
 	drift_before_after: float = float("nan")
+	prequential_predictions: torch.Tensor | None = None
+	retrospective_predictions: torch.Tensor | None = None
+	prequential_accuracy: float = float("nan")
+	retrospective_accuracy: float = float("nan")
 
 
 def adapt_target_session(
 	model: SNNFeatureExtractor,
 	prototypes: torch.Tensor,
 	target_spikes: np.ndarray | torch.Tensor,
-	target_labels: np.ndarray | torch.Tensor | None = None,
 	*,
 	momentum: float = 0.95,
 	confidence_threshold: float = 0.8,
@@ -45,10 +48,11 @@ def adapt_target_session(
 	noise_std: float = 0.05,
 	pull_rate: float = 0.5,
 ) -> PhaseBResult:
-	"""Adapt prototypes from target spikes without using labels for updates.
+	"""Adapt prototypes from target spikes using strictly prequential updates.
 
-	Target labels, when supplied, are used only to report before/after accuracy.
-	The SNN parameters are never modified.
+	Each target trial is predicted first, then optionally used with its
+	pseudo-label for the prototype update. No evaluation labels enter this
+	operational path. The SNN parameters are never modified.
 
 	When ``enable_consolidation=True``, a gradient-free sleep-phase consolidation
 	mechanism runs every ``consolidation_interval`` adaptation steps, preventing
@@ -90,19 +94,13 @@ def adapt_target_session(
 			feature = model(spikes[:, :, trial_index:trial_index + 1])
 			features.append(feature)
 		features = torch.cat(features, dim=0)
-		before, _ = memory.predict(features, temperature)
-		before_accuracy = float("nan")
-		labels = None
-		if target_labels is not None:
-			labels = torch.as_tensor(np.asarray(target_labels).reshape(-1), dtype=torch.long)
-			if labels.numel() != features.shape[0]:
-				raise ValueError("each target trial must have exactly one label")
-			before_accuracy = float((before == labels).float().mean())
+		prequential_predictions = []
 		accepted_trials = 0
 		consolidation_count = 0
 		for trial_index in range(features.shape[0]):
 			feature = features[trial_index:trial_index + 1]
 			prediction, confidence = memory.predict(feature, temperature)
+			prequential_predictions.append(prediction.item())
 			if confidence.item() > confidence_threshold:
 				memory.update(feature, prediction)
 				accepted_trials += 1
@@ -115,10 +113,7 @@ def adapt_target_session(
 						memory.prototypes = updated_proto
 						consolidation_count += 1
 
-		after, _ = memory.predict(features, temperature)
-		after_accuracy = float("nan")
-		if labels is not None:
-			after_accuracy = float((after == labels).float().mean())
+		retrospective_predictions, _ = memory.predict(features, temperature)
 	retention_accuracy = float("nan")
 	if source_spikes is not None and source_labels is not None:
 		source_tensor = torch.as_tensor(source_spikes, dtype=torch.float32)
@@ -144,15 +139,40 @@ def adapt_target_session(
 		drift_val = float(loss.item())
 
 	return PhaseBResult(
-		before_accuracy=before_accuracy,
-		after_accuracy=after_accuracy,
+		before_accuracy=float("nan"),
+		after_accuracy=float("nan"),
 		accepted_trials=accepted_trials,
 		prototypes=memory.prototypes,
 		retention_accuracy=retention_accuracy,
 		acceptance_rate=accepted_trials / features.shape[0],
 		consolidation_phases=consolidation_count,
 		drift_before_after=drift_val,
+		prequential_predictions=torch.as_tensor(prequential_predictions, dtype=torch.long),
+		retrospective_predictions=retrospective_predictions.cpu(),
 	)
+
+
+def score_adaptation(
+	result: PhaseBResult,
+	target_labels: np.ndarray | torch.Tensor,
+) -> PhaseBResult:
+	"""Score recorded prequential and retrospective predictions.
+
+	This function is deliberately separate from adaptation so changing
+	evaluation labels cannot alter prototype updates or predictions.
+	"""
+	labels = torch.as_tensor(np.asarray(target_labels).reshape(-1), dtype=torch.long)
+	if result.prequential_predictions is None or result.retrospective_predictions is None:
+		raise ValueError("adaptation result does not contain recorded predictions")
+	if labels.numel() != result.prequential_predictions.numel():
+		raise ValueError("target labels must match the number of recorded predictions")
+	pre = float((result.prequential_predictions == labels).float().mean())
+	retro = float((result.retrospective_predictions == labels).float().mean())
+	result.before_accuracy = pre
+	result.after_accuracy = retro
+	result.prequential_accuracy = pre
+	result.retrospective_accuracy = retro
+	return result
 
 
 def calibrate_target_session(

@@ -1,12 +1,12 @@
 """Evaluation metrics and spike-sparsity tracking for NeuroStream.
 
-This module provides standard performance and neuromorphic efficiency metrics:
+This module provides standard performance and spike-activity metrics:
 - Accuracy: classification correctness
 - Adaptation gain: post-adaptation accuracy minus pre-adaptation accuracy
 - Retention: source (session-1) accuracy after continuous target adaptation
 - Forgetting: drop in session-1 accuracy from initial baseline
-- Spike sparsity: mean firing rate across all LIF layers measured via forward hooks,
-  serving as empirical validation for neuromorphic energy efficiency.
+- Spike sparsity: mean firing rate across all LIF layers measured via forward hooks.
+  This is activity reporting, not a direct hardware-energy measurement.
 """
 
 from __future__ import annotations

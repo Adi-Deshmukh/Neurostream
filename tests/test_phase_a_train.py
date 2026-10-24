@@ -26,13 +26,14 @@ def test_phase_a_trains_freezes_and_saves_artifacts(tmp_path):
     )
 
     assert result.prototypes.shape == (4, 8)
-    assert 0.0 <= result.test_accuracy <= 1.0
     assert len(result.train_losses) == 2
     assert result.checkpoint_path.exists()
     assert result.prototype_path.exists()
     assert torch.load(result.prototype_path, weights_only=True).shape == (4, 8)
     assert all(not parameter.requires_grad for parameter in result.model.parameters())
     checkpoint = torch.load(result.checkpoint_path, weights_only=False)
+    assert "test_accuracy" not in checkpoint
+    assert "linear_head_test_accuracy" not in checkpoint
     assert checkpoint["label_values"] == [10, 20, 30, 40]
     assert checkpoint["label_names"] == ["10", "20", "30", "40"]
     assert set(checkpoint["preprocessing_contract"]) >= {
@@ -63,5 +64,4 @@ def test_phase_a_seed_reproduces_metrics(tmp_path):
     )
 
     assert first.train_accuracy == second.train_accuracy
-    assert first.test_accuracy == second.test_accuracy
     torch.testing.assert_close(first.prototypes, second.prototypes)

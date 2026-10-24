@@ -27,8 +27,8 @@ from neurostream.evaluation.metrics import (
     measure_model_sparsity,
 )
 from neurostream.models.snn_feature_extractor import SNNFeatureExtractor
-from neurostream.training.phase_a_train import train_phase_a
-from neurostream.training.phase_b_adapt import adapt_target_session
+from neurostream.training.phase_a_train import evaluate_phase_a, train_phase_a
+from neurostream.training.phase_b_adapt import adapt_target_session, score_adaptation
 from neurostream.utils.seed import seed_everything
 
 logger = logging.getLogger(__name__)
@@ -150,8 +150,6 @@ def run_subject_cross_session(
     phase_a = train_phase_a(
         train_spikes,
         train_session.y,
-        test_spikes,
-        test_session.y,
         subject=subject,
         epochs=epochs,
         batch_size=batch_size,
@@ -180,6 +178,19 @@ def run_subject_cross_session(
             "channel_order": list(train_session.channel_names),
         },
     )
+    phase_a_eval = evaluate_phase_a(
+        phase_a.model,
+        phase_a.prototypes,
+        test_spikes,
+        test_session.y,
+        phase_a.label_values,
+        temperature=0.1,
+        train_spikes=train_spikes,
+        train_labels=train_session.y,
+        linear_head_epochs=epochs,
+        batch_size=batch_size,
+        seed=seed,
+    )
 
     # 4. Measure Neuromorphic Spike Sparsity via Forward Hooks
     target_spikes_tensor = torch.as_tensor(test_spikes, dtype=torch.float32)
@@ -201,7 +212,6 @@ def run_subject_cross_session(
         phase_a.model,
         phase_a.prototypes,
         test_spikes,
-        target_labels,
         momentum=momentum,
         confidence_threshold=confidence_threshold,
         batch_size=batch_size,
@@ -213,20 +223,21 @@ def run_subject_cross_session(
         noise_std=noise_std,
         pull_rate=pull_rate,
     )
+    phase_b = score_adaptation(phase_b, target_labels)
 
     gain = phase_b.after_accuracy - phase_b.before_accuracy
-    forget = phase_a.test_accuracy - phase_b.retention_accuracy
+    forget = phase_a_eval["prototype_accuracy"] - phase_b.retention_accuracy
 
     return SubjectRunResult(
         subject=subject,
         seed=seed,
         phase_a_train_acc=phase_a.train_accuracy,
         phase_a_val_acc=phase_a.validation_accuracy,
-        phase_a_test_acc=phase_a.test_accuracy,
+        phase_a_test_acc=float(phase_a_eval["prototype_accuracy"]),
         pre_adaptation_acc=phase_b.before_accuracy,
         post_adaptation_acc=phase_b.after_accuracy,
         adaptation_gain=gain,
-        initial_retention_acc=phase_a.test_accuracy,
+        initial_retention_acc=float(phase_a_eval["prototype_accuracy"]),
         post_retention_acc=phase_b.retention_accuracy,
         forgetting=forget,
         spike_sparsity=mean_sparsity,

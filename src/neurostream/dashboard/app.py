@@ -132,7 +132,7 @@ st.markdown(
         <span class="badge-pill" style="background-color: #10B981;">REAL DATA • NO MOCKS</span>
         <div class="header-title">🧠 NeuroStream: Adaptive Spiking BCI Architecture</div>
         <div class="header-subtitle">
-            Empirical evaluation of online motor-imagery adaptation with zero raw-data storage & orders-of-magnitude neuromorphic energy advantage.
+            Empirical evaluation of online motor-imagery adaptation with zero raw-data storage and measured spike activity.
         </div>
     </div>
     """,
@@ -568,8 +568,8 @@ with tab_cross_subject:
                 "Subject": f"Subject S{s:02d}",
                 "Phase A Train": f"{data.get('train_accuracy', 0)*100:.2f}%",
                 "Phase A Val": f"{data.get('validation_accuracy', 0)*100:.2f}%",
-                "Phase A Test": f"{data.get('test_accuracy', 0)*100:.2f}%",
-                "Linear Head Baseline": f"{(data.get('linear_head_test_accuracy') or 0)*100:.2f}%",
+                "Phase A Test": f"{data['test_accuracy']*100:.2f}%" if data.get("test_accuracy") is not None else "N/A",
+                "Linear Head Baseline": f"{data['linear_head_test_accuracy']*100:.2f}%" if data.get("linear_head_test_accuracy") is not None else "N/A",
                 "Feature Dim": data["feature_dim"],
                 "Classes": len(data["label_values"]),
             })
@@ -582,12 +582,16 @@ with tab_cross_subject:
     with chart_c1:
         # Grouped Bar: SNN Prototype vs Linear Baseline
         fig_acc = go.Figure()
-        sub_labels = [d["Subject"] for d in table_data]
-        snn_accs = [float(d["Phase A Test"].replace("%", "")) for d in table_data]
-        lin_accs = [float(d["Linear Head Baseline"].replace("%", "")) for d in table_data]
+        test_rows = [d for d in table_data if d["Phase A Test"] != "N/A"]
+        sub_labels = [d["Subject"] for d in test_rows]
+        snn_accs = [float(d["Phase A Test"].replace("%", "")) for d in test_rows]
+        linear_rows = [d for d in test_rows if d["Linear Head Baseline"] != "N/A"]
+        lin_labels = [d["Subject"] for d in linear_rows]
+        lin_accs = [float(d["Linear Head Baseline"].replace("%", "")) for d in linear_rows]
 
         fig_acc.add_trace(go.Bar(x=sub_labels, y=snn_accs, name="SNN + Prototype Cosine", marker_color="#0284C7"))
-        fig_acc.add_trace(go.Bar(x=sub_labels, y=lin_accs, name="Linear Head Baseline", marker_color="#CBD5E1"))
+        if linear_rows:
+            fig_acc.add_trace(go.Bar(x=lin_labels, y=lin_accs, name="Linear Head Baseline", marker_color="#CBD5E1"))
 
         fig_acc.update_layout(
             title="Supervised Accuracy Across All 9 Subjects (Held-Out Test)",
@@ -604,8 +608,8 @@ with tab_cross_subject:
     with chart_c2:
         # Train vs Val vs Test Generalization Gap
         fig_gap = go.Figure()
-        train_accs = [float(d["Phase A Train"].replace("%", "")) for d in table_data]
-        val_accs = [float(d["Phase A Val"].replace("%", "")) for d in table_data]
+        train_accs = [float(d["Phase A Train"].replace("%", "")) for d in test_rows]
+        val_accs = [float(d["Phase A Val"].replace("%", "")) for d in test_rows]
 
         fig_gap.add_trace(go.Scatter(x=sub_labels, y=train_accs, mode="lines+markers", name="Train Accuracy", line=dict(color="#10B981", width=2)))
         fig_gap.add_trace(go.Scatter(x=sub_labels, y=val_accs, mode="lines+markers", name="Val Accuracy", line=dict(color="#F59E0B", width=2)))
@@ -628,7 +632,7 @@ with tab_cross_subject:
 # =============================================================================
 with tab_architecture:
     st.markdown("### ⚡ Neuromorphic Energy Efficiency & Sparsity Validation")
-    st.caption("Empirical measurements proving the 'orders-of-magnitude energy advantage' over traditional continuous ANNs.")
+    st.caption("Measured spike activity from the replay model; this is not a direct energy measurement.")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -636,21 +640,17 @@ with tab_architecture:
             f"""
             #### Real Empirical Measurements
             - **Input Spike Encoding:** 22 Channels × 3 Frequency Bands = **66 Virtual Channels** over **25 Timesteps**.
-            - **Spike Encoder Sparsity:** Alpha/Beta rate coding + Gamma TTFS maintains temporal onset with **~34.7% firing rate**.
-            - **LIF Layer 1 (FC-256-LIF):** Forward-hook measured firing rate of **{sim_data.layer_sparsities.get('fc1_lif', 0.1125):.2%}**.
-            - **LIF Layer 2 (FC-128-LIF):** Forward-hook measured firing rate of **{sim_data.layer_sparsities.get('fc2_lif', 0.0133):.2%}**.
+            - **Spike Encoder Activity:** Alpha/Beta rate coding + Gamma TTFS measured on replay input.
+            - **LIF Layer 1 (FC-256-LIF):** Forward-hook measured firing rate of **{sim_data.layer_sparsities.get('lif1', float('nan')):.2%}**.
+            - **LIF Layer 2 (FC-128-LIF):** Forward-hook measured firing rate of **{sim_data.layer_sparsities.get('lif2', float('nan')):.2%}**.
             - **Aggregate Network Sparsity:** **{sim_data.mean_sparsity:.2%}**
 
             ---
             
-            #### The Neuromorphic Hardware Advantage
-            On traditional GPUs (e.g. NVIDIA H100/A100), computing a dense matrix multiplication requires executing multiply-accumulate (MAC) operations continuously:
-            `Power_GPU ∝ O(B · T · M · N)`
-            
-            On event-driven neuromorphic silicon (e.g. Intel Loihi 2, SynSense Xylo):
-            - **Zero spikes = zero dynamic energy (E_spike ≈ 0).**
-            - Synaptic accumulation operations are triggered **only upon spike arrival**.
-            - Because the network is silent for **{(1 - sim_data.mean_sparsity)*100:.1f}%** of timesteps, energy consumption drops by over **10× to 50×**.
+            #### Interpretation
+            These values report observed spike firing rates and duty cycle for
+            this model/input replay only. Hardware energy and savings require a
+            defined device, workload, measurement protocol, and baseline.
             """
         )
 
@@ -661,7 +661,7 @@ with tab_architecture:
         fig_donut = go.Figure(
             data=[
                 go.Pie(
-                    labels=["Silent Neurons (0 Dynamic Power)", "Active Spiking Neurons"],
+                    labels=["Silent Neuron Timesteps", "Active Spiking Neuron Timesteps"],
                     values=[silent_pct, active_pct],
                     hole=0.60,
                     marker_colors=["#10B981", "#0284C7"],

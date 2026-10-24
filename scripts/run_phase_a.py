@@ -32,8 +32,8 @@ def main() -> None:
 		validation_fraction=args.validation_fraction,
 		checkpoint_dir=args.checkpoint_dir,
 	)
-	print(f"subject={args.subject} train_accuracy={result.train_accuracy:.2%} validation_accuracy={result.validation_accuracy:.2%} test_accuracy={result.test_accuracy:.2%}")
-	print(f"linear_head_train_accuracy={result.linear_head_train_accuracy:.2%} linear_head_test_accuracy={result.linear_head_test_accuracy:.2%}")
+	print(f"subject={args.subject} train_accuracy={result.train_accuracy:.2%} validation_accuracy={result.validation_accuracy:.2%}")
+	print(f"linear_head_train_accuracy={result.linear_head_train_accuracy if result.linear_head_train_accuracy is not None else 'N/A'}")
 	print(f"checkpoint={result.checkpoint_path}")
 	print(f"prototypes={result.prototype_path} shape={tuple(result.prototypes.shape)}")
 

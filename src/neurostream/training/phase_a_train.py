@@ -21,7 +21,6 @@ class PhaseAResult:
 
 	model: SNNFeatureExtractor
 	prototypes: torch.Tensor
-	test_accuracy: float
 	train_accuracy: float
 	validation_accuracy: float
 	validation_size: int
@@ -29,7 +28,6 @@ class PhaseAResult:
 	label_values: np.ndarray
 	checkpoint_path: Path | None
 	prototype_path: Path | None
-	linear_head_test_accuracy: float | None = None
 	linear_head_train_accuracy: float | None = None
 	encoder_calibration: object | None = None  # EncoderCalibration | None
 
@@ -234,8 +232,8 @@ def _linear_head_comparison(
 	initial_state: dict[str, torch.Tensor],
 	train_x: torch.Tensor,
 	train_y: torch.Tensor,
-	test_x: torch.Tensor,
-	test_y: torch.Tensor,
+	eval_x: torch.Tensor,
+	eval_y: torch.Tensor,
 	*,
 	in_features: int,
 	hidden_features: int,
@@ -265,15 +263,15 @@ def _linear_head_comparison(
 	encoder.eval()
 	with torch.no_grad():
 		train_accuracy = _accuracy(classifier(encoder(train_x)).argmax(dim=1), train_y)
-		test_accuracy  = _accuracy(classifier(encoder(test_x)).argmax(dim=1),  test_y)
-	return train_accuracy, test_accuracy
+		eval_accuracy = _accuracy(classifier(encoder(eval_x)).argmax(dim=1), eval_y)
+	return train_accuracy, eval_accuracy
 
 
 def train_phase_a(
 	train_spikes: np.ndarray | torch.Tensor,
 	train_labels: np.ndarray | torch.Tensor,
-	test_spikes: np.ndarray | torch.Tensor,
-	test_labels: np.ndarray | torch.Tensor,
+	validation_spikes: np.ndarray | torch.Tensor | None = None,
+	validation_labels: np.ndarray | torch.Tensor | None = None,
 	*,
 	subject: int = 1,
 	epochs: int = 50,
@@ -284,7 +282,7 @@ def train_phase_a(
 	seed: int = 42,
 	validation_fraction: float = 0.2,
 	augmentation_probability: float = 0.0,
-	compare_linear_head: bool = True,
+	compare_linear_head: bool = False,
 	model: SNNFeatureExtractor | None = None,
 	checkpoint_dir: str | Path = "results/checkpoints",
 	device: torch.device | str = "cpu",
@@ -297,6 +295,8 @@ def train_phase_a(
 	Inputs use the spike encoder layout ``(channels, timesteps, trials)``.
 	The labels are mapped to consecutive class indices for CrossEntropyLoss;
 	the original sorted label values are returned in ``label_values``.
+	No final test data is accepted or evaluated here. Use
+	:func:`evaluate_phase_a` after training and model selection.
 
 	Parameters
 	----------
@@ -312,31 +312,41 @@ def train_phase_a(
 		raise ValueError("augmentation_probability must be in [0, 1)")
 	_set_seed(seed)
 	train_x = _as_spike_tensor(train_spikes).to(device)
-	test_x  = _as_spike_tensor(test_spikes).to(device)
-	if train_x.shape[:2] != test_x.shape[:2]:
-		raise ValueError("train and test spikes must have matching channel and timestep dimensions")
+	validation_x = (
+		_as_spike_tensor(validation_spikes).to(device)
+		if validation_spikes is not None else None
+	)
 	train_y, label_values = _encode_labels(train_labels)
 	if len(label_values) != n_classes:
 		raise ValueError(
 			f"expected {n_classes} training classes, found {len(label_values)}"
 		)
-	test_values = np.asarray(test_labels).reshape(-1)
-	if test_values.size == 0 or not np.isfinite(test_values).all():
-		raise ValueError("test labels must be non-empty and finite")
-	if not np.isin(test_values, label_values).all():
-		raise ValueError("test labels contain classes absent from training labels")
-	test_y = torch.as_tensor(
-		np.searchsorted(label_values, test_values), dtype=torch.long, device=device
-	)
 	train_y = train_y.to(device)
-	if train_x.shape[-1] != train_y.numel() or test_x.shape[-1] != test_y.numel():
+	if train_x.shape[-1] != train_y.numel():
 		raise ValueError("each spike trial must have exactly one label")
-	fit_indices, validation_indices = _stratified_split(
-		train_y, validation_fraction, seed
-	)
-	fit_x, fit_y = train_x[:, :, fit_indices], train_y[fit_indices]
-	validation_x = train_x[:, :, validation_indices]
-	validation_y = train_y[validation_indices]
+	validation_y = None
+	if validation_x is not None:
+		if validation_labels is None:
+			raise ValueError("validation_labels are required with validation_spikes")
+		validation_values = np.asarray(validation_labels).reshape(-1)
+		if validation_values.size != validation_x.shape[-1] or not np.isfinite(validation_values).all():
+			raise ValueError("validation labels must align with validation spikes")
+		if not np.isin(validation_values, label_values).all():
+			raise ValueError("validation labels contain classes absent from training labels")
+		if validation_x.shape[:2] != train_x.shape[:2]:
+			raise ValueError("validation spikes must match training channel and timestep dimensions")
+		validation_y = torch.as_tensor(
+			np.searchsorted(label_values, validation_values), dtype=torch.long, device=device
+		)
+	if validation_x is None:
+		fit_indices, validation_indices = _stratified_split(train_y, validation_fraction, seed)
+		fit_x, fit_y = train_x[:, :, fit_indices], train_y[fit_indices]
+		validation_x = train_x[:, :, validation_indices]
+		validation_y = train_y[validation_indices]
+		validation_size = validation_indices.numel()
+	else:
+		fit_x, fit_y = train_x, train_y
+		validation_size = validation_x.shape[-1]
 
 	network = model or SNNFeatureExtractor(in_features=train_x.shape[0])
 	network.to(device)
@@ -354,10 +364,10 @@ def train_phase_a(
 	validation_accuracy = _evaluate_prototypes(
 		network, validation_x, validation_y, final_prototypes, temperature
 	)
-	linear_train_accuracy = linear_test_accuracy = None
+	linear_train_accuracy = None
 	if compare_linear_head:
-		linear_train_accuracy, linear_test_accuracy = _linear_head_comparison(
-			initial_state, fit_x, fit_y, test_x, test_y,
+		linear_train_accuracy, _ = _linear_head_comparison(
+			initial_state, fit_x, fit_y, validation_x, validation_y,
 			in_features=train_x.shape[0], out_features=network.out_features,
 			hidden_features=network.fc1.out_features,
 			n_classes=n_classes, epochs=epochs, learning_rate=learning_rate,
@@ -367,9 +377,6 @@ def train_phase_a(
 	network.eval()
 	with torch.no_grad():
 		final_prototypes = _class_prototypes(network(fit_x), fit_y, n_classes)
-		test_features    = network(test_x)
-		predictions      = prototype_logits(test_features, final_prototypes, temperature).argmax(dim=1)
-		test_accuracy    = float((predictions == test_y).float().mean().cpu())
 
 	for parameter in network.parameters():
 		parameter.requires_grad_(False)
@@ -426,11 +433,9 @@ def train_phase_a(
 			"model_state_dict": network.state_dict(),
 			"subject": subject,
 			"seed": seed,
-			"test_accuracy": test_accuracy,
 			"train_accuracy": train_accuracy,
 			"validation_accuracy": validation_accuracy,
-			"validation_size": validation_indices.numel(),
-			"linear_head_test_accuracy": linear_test_accuracy,
+			"validation_size": validation_size,
 			"linear_head_train_accuracy": linear_train_accuracy,
 			"label_values": label_values.tolist(),
 			"label_names": label_names,
@@ -443,25 +448,22 @@ def train_phase_a(
 	torch.save(final_prototypes.cpu(), prototype_path)
 	logger.info(
 		"Phase A subject %s fit_accuracy=%.2f%% validation_accuracy=%.2f%% "
-		"test_accuracy=%.2f%%; prototypes=%s",
+		"prototypes=%s",
 		subject,
 		train_accuracy * 100,
 		validation_accuracy * 100,
-		test_accuracy * 100,
 		tuple(final_prototypes.shape),
 	)
 	return PhaseAResult(
 		model=network,
 		prototypes=final_prototypes.cpu(),
-		test_accuracy=test_accuracy,
 		train_accuracy=train_accuracy,
 		validation_accuracy=validation_accuracy,
-		validation_size=validation_indices.numel(),
+		validation_size=validation_size,
 		train_losses=losses,
 		label_values=label_values,
 		checkpoint_path=checkpoint_path,
 		prototype_path=prototype_path,
-		linear_head_test_accuracy=linear_test_accuracy,
 		linear_head_train_accuracy=linear_train_accuracy,
 		encoder_calibration=encoder_calibration,
 	)
@@ -470,6 +472,64 @@ def train_phase_a(
 def train(*args, **kwargs) -> PhaseAResult:
 	"""Compatibility alias for :func:`train_phase_a`."""
 	return train_phase_a(*args, **kwargs)
+
+
+def evaluate_phase_a(
+	model: SNNFeatureExtractor,
+	prototypes: torch.Tensor,
+	eval_spikes: np.ndarray | torch.Tensor,
+	eval_labels: np.ndarray | torch.Tensor,
+	label_values: np.ndarray | torch.Tensor,
+	*,
+	temperature: float = 0.1,
+	train_spikes: np.ndarray | torch.Tensor | None = None,
+	train_labels: np.ndarray | torch.Tensor | None = None,
+	linear_head_epochs: int = 50,
+	batch_size: int = 32,
+	seed: int = 42,
+) -> dict[str, float | None]:
+	"""Evaluate a frozen Phase A model on data not used for training decisions.
+
+	The prototype and optional linear-head metrics are computed here, after
+	training and hyperparameter selection. This function is the only place that
+	accepts final evaluation data.
+	"""
+	eval_x = _as_spike_tensor(eval_spikes)
+	values = np.asarray(eval_labels).reshape(-1)
+	raw_values = np.asarray(label_values).reshape(-1)
+	if eval_x.shape[-1] != values.size or not np.isfinite(values).all():
+		raise ValueError("evaluation spikes and labels must be aligned and finite")
+	if raw_values.size != prototypes.shape[0] or len(np.unique(raw_values)) != raw_values.size:
+		raise ValueError("label_values must match prototype classes")
+	if not np.isin(values, raw_values).all():
+		raise ValueError("evaluation labels contain classes absent from training")
+	encoded = torch.as_tensor(np.searchsorted(raw_values, values), dtype=torch.long)
+	model.eval()
+	with torch.no_grad():
+		features = model(eval_x)
+		predictions = prototype_logits(features, prototypes, temperature).argmax(dim=1)
+	result: dict[str, float | None] = {
+		"prototype_accuracy": _accuracy(predictions, encoded),
+		"linear_head_accuracy": None,
+	}
+	if train_spikes is not None or train_labels is not None:
+		if train_spikes is None or train_labels is None:
+			raise ValueError("train_spikes and train_labels are required together")
+		train_x = _as_spike_tensor(train_spikes)
+		train_values = np.asarray(train_labels).reshape(-1)
+		if train_x.shape[-1] != train_values.size or not np.isin(train_values, raw_values).all():
+			raise ValueError("linear-head training data is invalid or contains unknown labels")
+		train_y = torch.as_tensor(np.searchsorted(raw_values, train_values), dtype=torch.long)
+		initial_state = {name: value.detach().clone() for name, value in model.state_dict().items()}
+		_, linear_eval = _linear_head_comparison(
+			initial_state, train_x, train_y, eval_x, encoded,
+			in_features=train_x.shape[0], hidden_features=model.fc1.out_features,
+			out_features=model.out_features, n_classes=raw_values.size,
+			epochs=linear_head_epochs, learning_rate=1e-3,
+			batch_size=batch_size, device=eval_x.device,
+		)
+		result["linear_head_accuracy"] = linear_eval
+	return result
 
 
 def train_subject(
@@ -488,10 +548,9 @@ def train_subject(
 ) -> PhaseAResult:
 	"""Load, encode, and train one MOABB subject end to end.
 
-	Calibration is fitted exclusively on the training-session data and
-	the fitted thresholds are applied (without re-fitting) to the held-out
-	test session.  The true sampling frequency is read from the raw MOABB
-	object so the encoder never relies on the hard-coded 250 Hz default.
+	Calibration is fitted exclusively on the training-session data and stored
+	with the Phase A checkpoint. Final-session evaluation is performed later by
+	``evaluate_phase_a`` using the stored contract.
 	"""
 	from neurostream.data.loader import load_bnci2014_001
 	from neurostream.data.spike_encoder import fit_encoder, apply_encoder
@@ -517,9 +576,8 @@ def train_subject(
 	# Step 1: fit calibration thresholds on training data ONLY.
 	calibration = fit_encoder(train_session.X, sfreq=train_sfreq)
 
-	# Step 2: apply pre-fitted thresholds to both splits (no re-fitting on test).
+	# Step 2: encode training data using the fitted calibration.
 	train_encoded = apply_encoder(train_session.X, calibration, sfreq=train_sfreq)
-	test_encoded  = apply_encoder(test_session.X, calibration, sfreq=test_sfreq)
 	train_label_names = {
 		int(item["event_code"]): str(item["event"])
 		for item in train_session.metadata
@@ -537,8 +595,6 @@ def train_subject(
 	return train_phase_a(
 		train_encoded.spikes,
 		train_session.y,
-		test_encoded.spikes,
-		test_session.y,
 		subject=subject,
 		epochs=epochs,
 		batch_size=batch_size,

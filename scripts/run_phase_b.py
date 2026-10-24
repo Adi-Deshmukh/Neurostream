@@ -9,7 +9,7 @@ import numpy as np
 from neurostream.data.loader import load_bnci2014_001
 from neurostream.data.spike_encoder import EncoderCalibration, apply_encoder
 from neurostream.models.snn_feature_extractor import SNNFeatureExtractor
-from neurostream.training.phase_b_adapt import adapt_target_session, calibrate_target_session
+from neurostream.training.phase_b_adapt import adapt_target_session, calibrate_target_session, score_adaptation
 
 
 def main() -> None:
@@ -84,7 +84,7 @@ def main() -> None:
 		)
 	else:
 		result = adapt_target_session(
-			model, prototypes, test_spikes, test_labels,
+			model, prototypes, test_spikes,
 			momentum=args.momentum, confidence_threshold=args.confidence_threshold,
 			batch_size=args.batch_size, source_spikes=train_spikes,
 			source_labels=train_labels,
@@ -94,6 +94,7 @@ def main() -> None:
 			noise_std=args.noise_std,
 			pull_rate=args.pull_rate,
 		)
+		result = score_adaptation(result, test_labels)
 	print(f"subject={args.subject} session={test_name}")
 	print(f"consolidation_enabled={args.enable_consolidation}")
 	print(f"before_accuracy={result.before_accuracy:.2%}")
