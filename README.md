@@ -121,24 +121,21 @@ Displays genuine experimental results loaded directly from our 9 trained checkpo
 1. **Benchmark Table**:
    - **Phase A Train Acc**: SNN training accuracy on Session 1 fit split.
    - **Phase A Val Acc**: Validation accuracy used for early stopping.
-   - **SNN Prototype Test Acc**: Held-out Session 1 test set accuracy using prototype cosine classification.
-   - **Linear Head Baseline**: Accuracy achieved by a standard linear classifier trained on SNN features.
-   - **Advantage Column**: Empirical gain of prototype cosine classification over linear head.
-2. **Comparison Bar Chart**: Side-by-side visualization of SNN Prototype Cosine accuracy vs. Linear Head Baseline across all 9 subjects.
-3. **Generalization Gap Profile**: Multi-line plot tracking the performance trajectory from Train $\rightarrow$ Validation $\rightarrow$ Held-Out Test.
+   - **Static Target Baseline**: Held-out target-session accuracy using the initial source prototypes.
+   - **Prequential Target Accuracy**: Held-out target-session accuracy scored before each online update.
+   - **Retrospective Diagnostic**: Target accuracy scored after all online updates; this is not an online metric.
+   - **Source Accuracy After**: Source-session retention measured with the adapted prototypes.
+2. **Comparison Bar Chart**: Side-by-side visualization of static target baseline and prequential adaptation from matching evaluation artifacts.
+3. **Generalization Gap Profile**: Multi-line plot tracking the performance trajectory from Train $\rightarrow$ Validation $\rightarrow$ Held-Out Target.
 
 ---
 
 ### 5. Tab 3: ⚡ Spike Activity & Sparsity
 
-Validates the neuromorphic hardware claims:
-- **Duty Cycle Donut Chart**: Shows the exact ratio of **Silent Neurons (92.06%)** vs. **Active Spiking Neurons (7.94%)**.
-- **Layer-by-Layer Firing Rate Hierarchy**:
-  - **Input Spike Encoder**: $34.7\%$ firing rate (dual rate + TTFS encoding).
-  - **LIF Layer 1 (FC-256)**: $11.25\%$ mean firing rate.
-  - **LIF Layer 2 (FC-128)**: $1.33\%$ mean firing rate.
-  - **Aggregate Network Sparsity**: **$7.94\%$**.
-- **Measurement scope**: Reports observed spike activity only. Energy, latency, or hardware savings require a defined device, workload, measurement protocol, and baseline.
+Reports measured spike activity from the selected simulation run:
+- **Input and layer activity**: Fractions of spike opportunities over the run's aggregation window.
+- **Aggregate network activity**: The measured aggregate LIF firing fraction.
+- **Measurement scope**: Reports observed spike activity only. Values are not firing rates in hertz, energy, latency, or hardware savings. Missing or stale measurements are not substituted with estimates.
 
 ---
 

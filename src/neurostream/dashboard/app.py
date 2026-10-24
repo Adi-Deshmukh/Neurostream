@@ -13,6 +13,7 @@ import streamlit as st
 import torch
 
 from neurostream.dashboard.simulation import ReplaySimulationData, TrialReplayEngine
+from neurostream.evaluation.artifacts import load_evaluation_artifact
 
 # ── Page Configuration & Enterprise Styling ────────────────────────────────────
 
@@ -238,6 +239,16 @@ sim_data = run_cached_replay(
     int(sleep_steps),
     pull_rate,
 )
+measurement = sim_data.measurement
+if measurement is None or measurement.checkpoint_ref != engine.checkpoint_ref:
+    st.error("Current simulation measurements are unavailable or do not match the selected checkpoint.")
+    measurement = None
+
+
+def _format_activity(value: float | None) -> str:
+    if value is None or not np.isfinite(value):
+        return "N/A"
+    return f"{value:.2%}"
 
 total_steps = len(sim_data.steps)
 
@@ -309,7 +320,9 @@ with tab_replay:
     )
     m_col5.metric(
         "NETWORK SPARSITY",
-        f"{sim_data.mean_sparsity:.1%}",
+        _format_activity(
+            measurement.aggregate_activity_fraction if measurement is not None else None
+        ),
         delta=">90% Silence (Zero Power)",
         delta_color="inverse",
     )
@@ -564,12 +577,39 @@ with tab_cross_subject:
             if len(data["label_values"]) != len(data["label_names"]):
                 st.error(f"Subject S{s:02d} checkpoint rejected: invalid label mapping.")
                 continue
+            artifact_path = c_p.parent / f"evaluation_subject_{s}.json"
+            if not artifact_path.exists():
+                st.info(f"Subject S{s:02d}: held-out evaluation has not been run.")
+                continue
+            try:
+                evaluation_artifact = load_evaluation_artifact(
+                    artifact_path, checkpoint_path=c_p, subject=s
+                )
+            except (OSError, ValueError, TypeError) as error:
+                st.error(f"Subject S{s:02d} evaluation rejected: {error}")
+                continue
+            metrics = evaluation_artifact["metrics"]
+            required_metrics = {
+                "target_static_baseline_acc",
+                "target_prequential_acc",
+                "target_retrospective_acc",
+                "source_accuracy_after_adaptation",
+            }
+            missing_metrics = required_metrics.difference(metrics)
+            if missing_metrics:
+                st.error(
+                    f"Subject S{s:02d} evaluation rejected: missing metrics "
+                    f"{sorted(missing_metrics)}"
+                )
+                continue
             table_data.append({
                 "Subject": f"Subject S{s:02d}",
                 "Phase A Train": f"{data.get('train_accuracy', 0)*100:.2f}%",
                 "Phase A Val": f"{data.get('validation_accuracy', 0)*100:.2f}%",
-                "Phase A Test": f"{data['test_accuracy']*100:.2f}%" if data.get("test_accuracy") is not None else "N/A",
-                "Linear Head Baseline": f"{data['linear_head_test_accuracy']*100:.2f}%" if data.get("linear_head_test_accuracy") is not None else "N/A",
+                "Static Target Baseline": f"{metrics['target_static_baseline_acc']*100:.2f}%",
+                "Prequential Target Accuracy": f"{metrics['target_prequential_acc']*100:.2f}%",
+                "Retrospective Diagnostic": f"{metrics['target_retrospective_acc']*100:.2f}%",
+                "Source Accuracy After": f"{metrics['source_accuracy_after_adaptation']*100:.2f}%",
                 "Feature Dim": data["feature_dim"],
                 "Classes": len(data["label_values"]),
             })
@@ -582,19 +622,16 @@ with tab_cross_subject:
     with chart_c1:
         # Grouped Bar: SNN Prototype vs Linear Baseline
         fig_acc = go.Figure()
-        test_rows = [d for d in table_data if d["Phase A Test"] != "N/A"]
+        test_rows = [d for d in table_data if d["Prequential Target Accuracy"] != "N/A"]
         sub_labels = [d["Subject"] for d in test_rows]
-        snn_accs = [float(d["Phase A Test"].replace("%", "")) for d in test_rows]
-        linear_rows = [d for d in test_rows if d["Linear Head Baseline"] != "N/A"]
-        lin_labels = [d["Subject"] for d in linear_rows]
-        lin_accs = [float(d["Linear Head Baseline"].replace("%", "")) for d in linear_rows]
+        snn_accs = [float(d["Prequential Target Accuracy"].replace("%", "")) for d in test_rows]
+        static_accs = [float(d["Static Target Baseline"].replace("%", "")) for d in test_rows]
 
-        fig_acc.add_trace(go.Bar(x=sub_labels, y=snn_accs, name="SNN + Prototype Cosine", marker_color="#0284C7"))
-        if linear_rows:
-            fig_acc.add_trace(go.Bar(x=lin_labels, y=lin_accs, name="Linear Head Baseline", marker_color="#CBD5E1"))
+        fig_acc.add_trace(go.Bar(x=sub_labels, y=static_accs, name="Static Target Baseline", marker_color="#CBD5E1"))
+        fig_acc.add_trace(go.Bar(x=sub_labels, y=snn_accs, name="Prequential Adaptation", marker_color="#0284C7"))
 
         fig_acc.update_layout(
-            title="Supervised Accuracy Across All 9 Subjects (Held-Out Test)",
+            title="Held-Out Target Baseline vs Prequential Adaptation",
             yaxis_title="Accuracy (%)",
             barmode="group",
             height=380,
@@ -613,7 +650,7 @@ with tab_cross_subject:
 
         fig_gap.add_trace(go.Scatter(x=sub_labels, y=train_accs, mode="lines+markers", name="Train Accuracy", line=dict(color="#10B981", width=2)))
         fig_gap.add_trace(go.Scatter(x=sub_labels, y=val_accs, mode="lines+markers", name="Val Accuracy", line=dict(color="#F59E0B", width=2)))
-        fig_gap.add_trace(go.Scatter(x=sub_labels, y=snn_accs, mode="lines+markers", name="Held-Out Test", line=dict(color="#0284C7", width=2)))
+        fig_gap.add_trace(go.Scatter(x=sub_labels, y=snn_accs, mode="lines+markers", name="Prequential Target", line=dict(color="#0284C7", width=2)))
 
         fig_gap.update_layout(
             title="Generalization Profile Across Train / Validation / Test",
@@ -641,9 +678,9 @@ with tab_architecture:
             #### Real Empirical Measurements
             - **Input Spike Encoding:** 22 Channels × 3 Frequency Bands = **66 Virtual Channels** over **25 Timesteps**.
             - **Spike Encoder Activity:** Alpha/Beta rate coding + Gamma TTFS measured on replay input.
-            - **LIF Layer 1 (FC-256-LIF):** Forward-hook measured firing rate of **{sim_data.layer_sparsities.get('lif1', float('nan')):.2%}**.
-            - **LIF Layer 2 (FC-128-LIF):** Forward-hook measured firing rate of **{sim_data.layer_sparsities.get('lif2', float('nan')):.2%}**.
-            - **Aggregate Network Sparsity:** **{sim_data.mean_sparsity:.2%}**
+            - **LIF layer activity fraction:** **{_format_activity(measurement.layer_activity_fraction.get('lif1') if measurement else None)}**.
+            - **LIF layer activity fraction:** **{_format_activity(measurement.layer_activity_fraction.get('lif2') if measurement else None)}**.
+            - **Aggregate activity fraction:** **{_format_activity(measurement.aggregate_activity_fraction if measurement else None)}**
 
             ---
             
@@ -655,14 +692,15 @@ with tab_architecture:
         )
 
     with c2:
-        active_pct = sim_data.mean_sparsity * 100
-        silent_pct = 100.0 - active_pct
+        active_fraction = measurement.aggregate_activity_fraction if measurement else None
+        active_pct = active_fraction * 100 if active_fraction is not None else 0
+        silent_pct = 100.0 - active_pct if active_fraction is not None else 0
 
         fig_donut = go.Figure(
             data=[
                 go.Pie(
                     labels=["Silent Neuron Timesteps", "Active Spiking Neuron Timesteps"],
-                    values=[silent_pct, active_pct],
+                    values=[silent_pct, active_pct] if active_fraction is not None else [],
                     hole=0.60,
                     marker_colors=["#10B981", "#0284C7"],
                     textinfo="label+percent",
@@ -680,13 +718,17 @@ with tab_architecture:
         st.plotly_chart(fig_donut, width="stretch")
 
         # Layer-by-layer sparsity comparison bar
-        layer_names = ["Spike Encoder", "LIF Layer 1 (FC-256)", "LIF Layer 2 (FC-128)", "Aggregate Network"]
-        layer_vals = [
-            34.7,
-            sim_data.layer_sparsities.get("fc1_lif", 0.1125) * 100,
-            sim_data.layer_sparsities.get("fc2_lif", 0.0133) * 100,
-            sim_data.mean_sparsity * 100,
-        ]
+        layer_names = []
+        layer_vals = []
+        if measurement is not None:
+            layer_names.append("Input activity")
+            layer_vals.append(measurement.input_activity_fraction * 100)
+            for layer_name, value in measurement.layer_activity_fraction.items():
+                if np.isfinite(value):
+                    layer_names.append(layer_name)
+                    layer_vals.append(value * 100)
+            layer_names.append("Aggregate activity")
+            layer_vals.append(measurement.aggregate_activity_fraction * 100)
 
         fig_layers = go.Figure(
             data=[
@@ -708,7 +750,10 @@ with tab_architecture:
             paper_bgcolor="rgba(0,0,0,0)",
             yaxis=dict(gridcolor="#F1F5F9", range=[0, 45]),
         )
-        st.plotly_chart(fig_layers, width="stretch")
+        if layer_vals:
+            st.plotly_chart(fig_layers, width="stretch")
+        else:
+            st.info("No valid spike-activity measurements are available for this run.")
 
 
 # =============================================================================

@@ -115,6 +115,7 @@ def test_cross_session_sweep_with_mock_dataset(tmp_path):
         validation_fraction=0.5,
         dataset=mock_ds,
         output_csv=csv_file,
+        checkpoint_dir=tmp_path / "checkpoints",
         hidden=32,
     )
 
@@ -125,6 +126,7 @@ def test_cross_session_sweep_with_mock_dataset(tmp_path):
     assert 0.0 <= run.post_adaptation_acc <= 1.0
     assert 0.0 <= run.spike_sparsity <= 1.0
     assert csv_file.exists()
+    assert (tmp_path / "checkpoints" / "sub_1" / "seed_42" / "evaluation_subject_1.json").exists()
 
     with csv_file.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)

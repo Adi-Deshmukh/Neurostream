@@ -8,6 +8,7 @@ on Session 1 data so points and prototype positions move smoothly without jitter
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -17,7 +18,7 @@ import torch
 
 from neurostream.data.loader import load_bnci2014_001
 from neurostream.data.spike_encoder import EncoderCalibration, apply_encoder
-from neurostream.evaluation.metrics import measure_model_sparsity
+from neurostream.evaluation.metrics import SpikeActivityMeasurement, measure_model_sparsity
 from neurostream.models.prototype_memory import PrototypeMemory
 from neurostream.models.snn_feature_extractor import SNNFeatureExtractor
 from neurostream.training.sleep_consolidation import SleepConsolidator
@@ -52,8 +53,9 @@ class ReplaySimulationData:
     session2_labels: np.ndarray  # shape (N_s2,)
     initial_prototypes_2d: np.ndarray  # shape (n_classes, 2)
     steps: list[ReplayStepRecord] = field(default_factory=list)
-    mean_sparsity: float = 0.0
-    layer_sparsities: dict[str, float] = field(default_factory=dict)
+    measurement: SpikeActivityMeasurement | None = None
+    run_id: str = ""
+    checkpoint_ref: str = ""
     projection_method: str = "PCA"
     initial_target_accuracy: float = 0.0
     adapted_target_accuracy: float = 0.0
@@ -76,8 +78,14 @@ class TrialReplayEngine:
         class_names: Sequence[str] | None = None,
         projection_method: str = "PCA",
         subject: int = 1,
+        run_id: str | None = None,
+        checkpoint_ref: str = "in-memory",
     ) -> None:
         self.subject = subject
+        self.checkpoint_ref = checkpoint_ref
+        self.run_id = run_id or hashlib.sha256(
+            np.asarray(session2_spikes).tobytes()
+        ).hexdigest()[:16]
         self.model = model
         self.model.eval()
         self.initial_prototypes = initial_prototypes.detach().clone().float()
@@ -127,7 +135,14 @@ class TrialReplayEngine:
         self.initial_prototypes_2d = self.projector.transform(self.initial_prototypes.cpu().numpy())
 
         # Measure neuromorphic spike sparsity via forward hooks
-        self.mean_sparsity, self.layer_sparsities = measure_model_sparsity(self.model, self.s2_spikes)
+        aggregate_activity, layer_activity = measure_model_sparsity(self.model, self.s2_spikes)
+        self.measurement = SpikeActivityMeasurement.from_activity(
+            run_id=self.run_id,
+            checkpoint_ref=self.checkpoint_ref,
+            input_spikes=self.s2_spikes,
+            layer_activity_fraction=layer_activity,
+            aggregate_activity_fraction=aggregate_activity,
+        )
 
         # Precompute static baseline accuracy on Session 2 (without adaptation)
         static_mem = PrototypeMemory(self.initial_prototypes.clone(), momentum=0.9999)
@@ -242,8 +257,9 @@ class TrialReplayEngine:
             session2_labels=self.s2_labels,
             initial_prototypes_2d=self.initial_prototypes_2d,
             steps=steps,
-            mean_sparsity=self.mean_sparsity,
-            layer_sparsities=self.layer_sparsities,
+            measurement=self.measurement,
+            run_id=self.run_id,
+            checkpoint_ref=self.checkpoint_ref,
             projection_method=self.projection_method,
             initial_target_accuracy=self.initial_target_accuracy,
             adapted_target_accuracy=adapted_target_acc,
@@ -298,6 +314,7 @@ class TrialReplayEngine:
             out_features=int(ckpt.get("feature_dim", 128)),
         )
         model.load_state_dict(ckpt["model_state_dict"])
+        checkpoint_ref = hashlib.sha256(Path(checkpoint_path).read_bytes()).hexdigest()
 
         label_values = torch.as_tensor(ckpt["label_values"])
         label_names = list(ckpt["label_names"])
@@ -322,4 +339,6 @@ class TrialReplayEngine:
             class_names=label_names,
             projection_method=projection_method,
             subject=subject,
+            run_id=f"{checkpoint_ref[:16]}-subject-{subject}",
+            checkpoint_ref=checkpoint_ref,
         )

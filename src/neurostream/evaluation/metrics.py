@@ -12,6 +12,7 @@ This module provides standard performance and spike-activity metrics:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable, Sequence
 import numpy as np
 import torch
@@ -141,13 +142,77 @@ class SpikeSparsityTracker:
         self.handles.clear()
         self.is_active = False
 
-    def __enter__(self) -> SpikeSparsityTracker:
+    def __enter__(self) -> "SpikeSparsityTracker":
         self.reset()
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.close()
 
+
+@dataclass(frozen=True)
+class SpikeActivityMeasurement:
+    """Validated spike-activity measurements for one model execution.
+
+    All activity values are fractions in [0, 1], not Hz or energy. They are
+    aggregated over the complete input batch and all model timesteps.
+    """
+
+    run_id: str
+    checkpoint_ref: str
+    measured_at_utc: str
+    aggregation_window: str
+    input_activity_fraction: float
+    layer_activity_fraction: dict[str, float]
+    aggregate_activity_fraction: float
+
+    def __post_init__(self) -> None:
+        values = [self.input_activity_fraction, self.aggregate_activity_fraction]
+        values.extend(self.layer_activity_fraction.values())
+        if not self.run_id or not self.checkpoint_ref or not self.measured_at_utc:
+            raise ValueError("measurement metadata must be non-empty")
+        if not self.aggregation_window:
+            raise ValueError("aggregation_window must be non-empty")
+        if not values or not all(np.isfinite(value) and 0 <= value <= 1 for value in values):
+            raise ValueError("activity measurements must be finite fractions in [0, 1]")
+
+    @property
+    def units(self) -> str:
+        return "fraction_of_spike_opportunities"
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "run_id": self.run_id,
+            "checkpoint_ref": self.checkpoint_ref,
+            "measured_at_utc": self.measured_at_utc,
+            "aggregation_window": self.aggregation_window,
+            "units": self.units,
+            "input_activity_fraction": self.input_activity_fraction,
+            "layer_activity_fraction": dict(self.layer_activity_fraction),
+            "aggregate_activity_fraction": self.aggregate_activity_fraction,
+        }
+
+    @classmethod
+    def from_activity(
+        cls,
+        *,
+        run_id: str,
+        checkpoint_ref: str,
+        input_spikes: torch.Tensor,
+        layer_activity_fraction: dict[str, float],
+        aggregate_activity_fraction: float,
+    ) -> "SpikeActivityMeasurement":
+        if input_spikes.numel() == 0 or not torch.isfinite(input_spikes).all():
+            raise ValueError("input spikes must be non-empty and finite")
+        return cls(
+            run_id=run_id,
+            checkpoint_ref=checkpoint_ref,
+            measured_at_utc=datetime.now(timezone.utc).isoformat(),
+            aggregation_window=f"input_batch_shape={tuple(input_spikes.shape)}",
+            input_activity_fraction=float(input_spikes.mean().item()),
+            layer_activity_fraction=dict(layer_activity_fraction),
+            aggregate_activity_fraction=float(aggregate_activity_fraction),
+        )
 
 def measure_model_sparsity(
     model: nn.Module,

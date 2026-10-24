@@ -27,6 +27,7 @@ from neurostream.evaluation.metrics import (
     format_metrics_table,
     measure_model_sparsity,
 )
+from neurostream.evaluation.artifacts import save_evaluation_artifact
 from neurostream.models.snn_feature_extractor import SNNFeatureExtractor
 from neurostream.training.phase_a_train import evaluate_phase_a, train_phase_a
 from neurostream.training.phase_b_adapt import adapt_target_session, score_adaptation
@@ -238,7 +239,7 @@ def run_subject_cross_session(
 
     gain = phase_b.prequential_accuracy - phase_b.static_baseline_accuracy
 
-    return SubjectRunResult(
+    result = SubjectRunResult(
         subject=subject,
         seed=seed,
         phase_a_train_acc=phase_a.train_accuracy,
@@ -256,6 +257,27 @@ def run_subject_cross_session(
         consolidation_phases=phase_b.consolidation_phases,
         consolidation_enabled=enable_consolidation,
     )
+    save_evaluation_artifact(
+        save_dir / f"evaluation_subject_{subject}.json",
+        checkpoint_path=phase_a.checkpoint_path,
+        subject=subject,
+        train_session=train_name,
+        evaluation_session=test_name,
+        metrics=asdict(result),
+        label_values=phase_a.label_values.tolist(),
+        label_names=[
+            event_names.get(int(value), str(value))
+            for value in phase_a.label_values
+        ],
+        run_config={
+            "seed": seed,
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "momentum": momentum,
+            "confidence_threshold": confidence_threshold,
+        },
+    )
+    return result
 
 
 def run_cross_session_sweep(

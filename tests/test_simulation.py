@@ -39,7 +39,9 @@ def test_replay_engine_initialization(mock_replay_engine):
     assert engine.s2_features_2d.shape == (50, 2)
     assert engine.initial_prototypes_2d.shape == (4, 2)
     assert len(engine.class_names) == 4
-    assert 0.0 <= engine.mean_sparsity <= 1.0
+    assert engine.measurement is not None
+    assert engine.measurement.units == "fraction_of_spike_opportunities"
+    assert 0.0 <= engine.measurement.aggregate_activity_fraction <= 1.0
 
 
 def test_replay_simulation_execution(mock_replay_engine):

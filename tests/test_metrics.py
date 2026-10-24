@@ -7,6 +7,7 @@ import torch.nn as nn
 
 from neurostream.evaluation.metrics import (
     EvaluationMetrics,
+    SpikeActivityMeasurement,
     SpikeSparsityTracker,
     accuracy,
     adaptation_gain,
@@ -51,6 +52,41 @@ def test_adaptation_gain_and_forgetting():
     # Retention rate: post / initial
     assert pytest.approx(retention_rate(0.80, 0.60)) == 0.75
     assert retention_rate(0.0, 0.5) == 0.0
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("input_activity_fraction", np.nan),
+        ("aggregate_activity_fraction", np.inf),
+    ],
+)
+def test_spike_activity_measurement_rejects_invalid_values(field, value):
+    values = {
+        "run_id": "run-1",
+        "checkpoint_ref": "checkpoint-1",
+        "measured_at_utc": "2025-01-01T00:00:00+00:00",
+        "aggregation_window": "test",
+        "input_activity_fraction": 0.1,
+        "layer_activity_fraction": {"lif1": 0.2},
+        "aggregate_activity_fraction": 0.3,
+    }
+    values[field] = value
+    with pytest.raises(ValueError, match="finite fractions"):
+        SpikeActivityMeasurement(**values)
+
+
+def test_spike_activity_measurement_rejects_missing_run_metadata():
+    with pytest.raises(ValueError, match="metadata"):
+        SpikeActivityMeasurement(
+            run_id="",
+            checkpoint_ref="checkpoint-1",
+            measured_at_utc="2025-01-01T00:00:00+00:00",
+            aggregation_window="test",
+            input_activity_fraction=0.0,
+            layer_activity_fraction={},
+            aggregate_activity_fraction=0.0,
+        )
 
 
 # ── SpikeSparsityTracker hook tests ──────────────────────────────────────────
@@ -152,4 +188,3 @@ def test_format_metrics_table():
     assert "55.32%" in table
     assert "OFF" in table
     assert "ON" in table
-
