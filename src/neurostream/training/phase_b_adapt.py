@@ -59,6 +59,16 @@ def adapt_target_session(
 	spikes = torch.as_tensor(target_spikes, dtype=torch.float32)
 	if spikes.ndim != 3:
 		raise ValueError("target_spikes must have shape (channels, timesteps, trials)")
+	if min(spikes.shape) < 1 or not torch.isfinite(spikes).all():
+		raise ValueError("target_spikes must be non-empty and finite")
+	if prototypes.ndim != 2 or prototypes.shape[0] < 2 or prototypes.shape[1] < 1:
+		raise ValueError("prototypes must have shape (classes, features)")
+	if not torch.isfinite(prototypes).all():
+		raise ValueError("prototypes must contain only finite values")
+	if hasattr(model, "fc1") and model.fc1.in_features != spikes.shape[0]:
+		raise ValueError("target spike channel count does not match model input features")
+	if hasattr(model, "out_features") and model.out_features != prototypes.shape[1]:
+		raise ValueError("prototype feature count does not match model output features")
 	memory = PrototypeMemory(prototypes, momentum=momentum)
 
 	consolidator = None
@@ -113,6 +123,10 @@ def adapt_target_session(
 	if source_spikes is not None and source_labels is not None:
 		source_tensor = torch.as_tensor(source_spikes, dtype=torch.float32)
 		source_y = torch.as_tensor(np.asarray(source_labels).reshape(-1), dtype=torch.long)
+		if source_tensor.ndim != 3 or source_tensor.shape[:2] != spikes.shape[:2]:
+			raise ValueError("source and target spikes must have matching channel and timestep dimensions")
+		if source_tensor.shape[-1] != source_y.numel() or not torch.isfinite(source_tensor).all():
+			raise ValueError("source spikes and labels must be non-empty, finite, and aligned")
 		with torch.no_grad():
 			source_features = torch.cat(
 				[
@@ -164,6 +178,10 @@ def calibrate_target_session(
 	labels = torch.as_tensor(np.asarray(target_labels).reshape(-1), dtype=torch.long)
 	if spikes.ndim != 3 or labels.numel() != spikes.shape[-1]:
 		raise ValueError("target spikes and labels must contain matching trial counts")
+	if min(spikes.shape) < 1 or not torch.isfinite(spikes).all():
+		raise ValueError("target spikes must be non-empty and finite")
+	if prototypes.ndim != 2 or prototypes.shape[0] < 2 or not torch.isfinite(prototypes).all():
+		raise ValueError("prototypes must be a finite (classes, features) tensor")
 	rng = np.random.default_rng(seed)
 	calibration, evaluation = [], []
 	for class_index in torch.unique(labels).tolist():

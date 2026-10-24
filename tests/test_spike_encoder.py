@@ -141,6 +141,16 @@ class TestInputValidation:
         with pytest.raises(ValueError, match="ndim"):
             encode(np.zeros((1000,)), sfreq=SFREQ)
 
+    def test_empty_input_rejected(self):
+        with pytest.raises(ValueError, match="at least one"):
+            encode(np.empty((0, N_CHANNELS, T_EPOCH)), sfreq=SFREQ)
+
+    def test_nan_input_rejected(self, synthetic_epochs):
+        invalid = synthetic_epochs.copy()
+        invalid[0, 0, 0] = np.nan
+        with pytest.raises(ValueError, match="finite"):
+            encode(invalid, sfreq=SFREQ)
+
 
 # =============================================================================
 # New tests covering calibration-aware API (fit_encoder / apply_encoder)
@@ -221,6 +231,13 @@ class TestApplyEncoder:
         gamma_spikes = result.spikes[gamma_start:, :, :]  # (22, 25, N)
         spikes_per_trial_channel = gamma_spikes.sum(axis=1)
         assert np.all(spikes_per_trial_channel == 1)
+
+    def test_sampling_rate_and_channel_contracts(self, synthetic_epochs):
+        cal = fit_encoder(synthetic_epochs, sfreq=SFREQ, n_timesteps=N_TIMESTEPS)
+        with pytest.raises(ValueError, match="sampling frequency mismatch"):
+            apply_encoder(synthetic_epochs, cal, sfreq=128.0)
+        with pytest.raises(ValueError, match="channel count mismatch"):
+            apply_encoder(synthetic_epochs[:, :-1], cal)
 
 
 class TestNyquistValidation:

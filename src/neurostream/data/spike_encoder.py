@@ -25,7 +25,7 @@ split.
 from __future__ import annotations
 
 import logging
-from typing import NamedTuple
+from dataclasses import dataclass
 
 import numpy as np
 from scipy.signal import butter, sosfiltfilt
@@ -43,14 +43,16 @@ BANDS = (ALPHA_BAND, BETA_BAND, GAMMA_BAND)
 N_BANDS = len(BANDS)
 
 
-class EncoderResult(NamedTuple):
+@dataclass(frozen=True)
+class EncoderResult:
     """Return type of :func:`encode` / :func:`apply_encoder`."""
 
     spikes: np.ndarray  # (channels * n_bands, n_timesteps, N) binary
     mean_firing_rate: float
 
 
-class EncoderCalibration(NamedTuple):
+@dataclass(frozen=True)
+class EncoderCalibration:
     """Per-channel rate-encoding thresholds fitted on training data.
 
     Attributes
@@ -64,6 +66,8 @@ class EncoderCalibration(NamedTuple):
     n_timesteps : int
         Number of temporal bins (timesteps) used when the calibration was fitted.
     rate_threshold_pct : float
+    channel_count : int
+    filter_order : int = 4
         Percentile used when the calibration was fitted.
     """
 
@@ -72,6 +76,8 @@ class EncoderCalibration(NamedTuple):
     sfreq: float
     n_timesteps: int
     rate_threshold_pct: float
+    channel_count: int
+    filter_order: int = 4
 
 
 # ── internal helpers ──────────────────────────────────────────────────────
@@ -85,6 +91,8 @@ def _validate_bands(sfreq: float) -> None:
     sampling rates (e.g. 128 Hz) the gamma upper edge would be clamped, and a
     warning is emitted because the clamp still produces a valid filter.
     """
+    if not np.isfinite(sfreq) or sfreq <= 0:
+        raise ValueError("sfreq must be a finite positive number")
     nyq = sfreq / 2.0
     for lo, hi in BANDS:
         effective_hi = min(hi, nyq - 2.0)
@@ -154,6 +162,8 @@ def _band_power(band_signal: np.ndarray, n_bins: int) -> np.ndarray:
         Mean squared amplitude per bin.
     """
     n_trials, n_ch, t_total = band_signal.shape
+    if t_total < n_bins:
+        raise ValueError("n_timesteps cannot exceed the number of epoch samples")
     # Truncate so T divides evenly into n_bins
     usable = (t_total // n_bins) * n_bins
     trimmed = band_signal[:, :, :usable]
@@ -179,6 +189,10 @@ def _fit_thresholds(
     -------
     thresholds : ndarray, shape ``(1, channels, 1)``
     """
+    if not 0 <= threshold_percentile <= 100:
+        raise ValueError("rate_threshold_pct must be between 0 and 100")
+    if power.size == 0 or not np.isfinite(power).all():
+        raise ValueError("training power must be non-empty and finite")
     return np.percentile(
         power, threshold_percentile, axis=(0, 2), keepdims=True
     ).astype(np.float32)
@@ -234,6 +248,10 @@ def _validate_epochs(
         )
     if n_timesteps < 1:
         raise ValueError("n_timesteps must be at least 1")
+    if not np.issubdtype(epochs.dtype, np.number):
+        raise ValueError("epochs must contain numeric values")
+    if not np.isfinite(epochs).all():
+        raise ValueError("epochs must contain only finite values")
     n_trials, n_ch, t_epoch = epochs.shape
     if n_trials < 1 or n_ch < 1:
         raise ValueError("epochs must contain at least one trial and channel")
@@ -326,6 +344,8 @@ def fit_encoder(
     calibration : EncoderCalibration
         Thresholds to serialise inside the model checkpoint.
     """
+    if not isinstance(n_timesteps, int):
+        raise ValueError("n_timesteps must be an integer")
     _validate_epochs(train_epochs, n_timesteps)
     _validate_bands(sfreq)
 
@@ -349,12 +369,15 @@ def fit_encoder(
         sfreq=sfreq,
         n_timesteps=n_timesteps,
         rate_threshold_pct=rate_threshold_pct,
+        channel_count=train_epochs.shape[1],
     )
 
 
 def apply_encoder(
     epochs: np.ndarray,
     calibration: EncoderCalibration,
+    *,
+    sfreq: float | None = None,
 ) -> EncoderResult:
     """Encode epochs using **pre-fitted** thresholds from :func:`fit_encoder`.
 
@@ -372,9 +395,32 @@ def apply_encoder(
     -------
     result : EncoderResult
     """
-    sfreq      = calibration.sfreq
+    if not isinstance(calibration, EncoderCalibration):
+        raise TypeError("calibration must be an EncoderCalibration")
+    if sfreq is not None and not np.isclose(float(sfreq), calibration.sfreq, atol=1e-3):
+        raise ValueError(
+            f"sampling frequency mismatch: calibration uses {calibration.sfreq} Hz, "
+            f"but input uses {float(sfreq)} Hz"
+        )
+    _validate_bands(calibration.sfreq)
+    if calibration.channel_count < 1 or calibration.n_timesteps < 1:
+        raise ValueError("calibration contains invalid channel or timestep metadata")
+    if not 0 <= calibration.rate_threshold_pct <= 100:
+        raise ValueError("calibration threshold percentile must be between 0 and 100")
+    if calibration.alpha_thresholds.shape != (1, calibration.channel_count, 1):
+        raise ValueError("alpha calibration thresholds have an invalid shape")
+    if calibration.beta_thresholds.shape != (1, calibration.channel_count, 1):
+        raise ValueError("beta calibration thresholds have an invalid shape")
+    if not np.isfinite(calibration.alpha_thresholds).all() or not np.isfinite(calibration.beta_thresholds).all():
+        raise ValueError("calibration thresholds must be finite")
+    sfreq = calibration.sfreq
     n_timesteps = calibration.n_timesteps
     n_trials, n_ch, _ = _validate_epochs(epochs, n_timesteps)
+    if n_ch != calibration.channel_count:
+        raise ValueError(
+            f"channel count mismatch: calibration expects {calibration.channel_count}, "
+            f"but input has {n_ch}"
+        )
 
     bands  = _decompose_bands(epochs, sfreq)
     powers = np.stack(
@@ -432,6 +478,8 @@ def encode(
         If ``epochs`` does not have 3 dimensions, or if any band is invalid for
         the supplied ``sfreq``.
     """
+    if not isinstance(n_timesteps, int):
+        raise ValueError("n_timesteps must be an integer")
     n_trials, n_ch, _ = _validate_epochs(epochs, n_timesteps)
     _validate_bands(sfreq)
 

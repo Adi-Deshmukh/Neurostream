@@ -15,6 +15,11 @@ class SessionData:
 	metadata: list[dict[str, Any]]
 	sfreq: float = 250.0
 	"""True sampling frequency in Hz, read from ``raw.info["sfreq"]``."""
+	channel_names: tuple[str, ...] = ()
+	tmin: float = 2.0
+	tmax: float = 6.0
+	l_freq: float = 4.0
+	h_freq: float = 100.0
 
 
 def load_bnci2014_001(
@@ -59,10 +64,18 @@ def load_bnci2014_001(
 	for session_name, raw_runs in grouped.items():
 		arrays, labels, metadata = [], [], []
 		session_sfreq: float | None = None
+		channel_names: tuple[str, ...] | None = None
 		for raw, subject_id, run_name in raw_runs:
 			# Extract the true sampling frequency from every run and confirm
 			# they are identical within this session.
 			run_sfreq = float(raw.info["sfreq"])
+			run_channel_names = tuple(raw.copy().pick("eeg").ch_names)
+			if channel_names is None:
+				channel_names = run_channel_names
+			elif run_channel_names != channel_names:
+				raise ValueError(
+					f"Session '{session_name}' contains runs with mismatched EEG channel order."
+				)
 			if session_sfreq is None:
 				session_sfreq = run_sfreq
 			elif abs(run_sfreq - session_sfreq) > 1e-3:
@@ -80,11 +93,18 @@ def load_bnci2014_001(
 				{**item, "subject": subject_id, "session": session_name, "run": run_name}
 				for item in run_metadata
 			)
+		if not arrays:
+			raise ValueError(f"Session '{session_name}' contains no runs")
 		result[session_name] = SessionData(
 			X=np.concatenate(arrays, axis=0).astype(np.float32, copy=False),
 			y=np.concatenate(labels, axis=0),
 			metadata=metadata,
 			sfreq=session_sfreq if session_sfreq is not None else 250.0,
+			channel_names=channel_names or (),
+			tmin=tmin,
+			tmax=tmax,
+			l_freq=l_freq,
+			h_freq=h_freq,
 		)
 	return result
 

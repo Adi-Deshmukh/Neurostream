@@ -16,7 +16,7 @@ from sklearn.decomposition import PCA
 import torch
 
 from neurostream.data.loader import load_bnci2014_001
-from neurostream.data.spike_encoder import encode
+from neurostream.data.spike_encoder import EncoderCalibration, apply_encoder
 from neurostream.evaluation.metrics import measure_model_sparsity
 from neurostream.models.prototype_memory import PrototypeMemory
 from neurostream.models.snn_feature_extractor import SNNFeatureExtractor
@@ -87,9 +87,19 @@ class TrialReplayEngine:
 
         self.s2_spikes = torch.as_tensor(session2_spikes, dtype=torch.float32)
         self.s2_labels = np.asarray(session2_labels).reshape(-1)
+        if self.s1_spikes.ndim != 3 or self.s2_spikes.ndim != 3:
+            raise ValueError("session spikes must have shape (channels, timesteps, trials)")
+        if self.s1_spikes.shape[:2] != self.s2_spikes.shape[:2]:
+            raise ValueError("session spikes must have matching channel and timestep dimensions")
+        if self.s1_spikes.shape[-1] != self.s1_labels.size or self.s2_spikes.shape[-1] != self.s2_labels.size:
+            raise ValueError("each session trial must have exactly one label")
+        if not torch.isfinite(self.s1_spikes).all() or not torch.isfinite(self.s2_spikes).all():
+            raise ValueError("session spikes must contain only finite values")
 
         n_classes = self.initial_prototypes.shape[0]
-        self.class_names = list(class_names) if class_names is not None else [f"Class {i+1}" for i in range(n_classes)]
+        if class_names is None or len(class_names) != n_classes:
+            raise ValueError("class_names must contain one name per prototype class")
+        self.class_names = list(class_names)
         self.projection_method = projection_method
 
         # 1. Extract Session 1 and Session 2 features from frozen SNN
@@ -258,8 +268,30 @@ class TrialReplayEngine:
         train_name = next(name for name in sessions if "train" in name.lower())
         test_name = next(name for name in sessions if "test" in name.lower())
 
-        s1_spikes = encode(sessions[train_name].X).spikes
-        s2_spikes = encode(sessions[test_name].X).spikes
+        required = ("encoder_calibration", "label_values", "label_names", "preprocessing_contract")
+        missing = [key for key in required if key not in ckpt or ckpt[key] is None]
+        if missing:
+            raise ValueError(
+                f"checkpoint is missing the preprocessing/label contract: {', '.join(missing)}"
+            )
+        payload = ckpt["encoder_calibration"]
+        calibration = EncoderCalibration(
+            alpha_thresholds=np.asarray(payload["alpha_thresholds"]),
+            beta_thresholds=np.asarray(payload["beta_thresholds"]),
+            sfreq=float(payload["sfreq"]),
+            n_timesteps=int(payload["n_timesteps"]),
+            rate_threshold_pct=float(payload["rate_threshold_pct"]),
+            channel_count=int(payload["channel_count"]),
+            filter_order=int(payload.get("filter_order", 4)),
+        )
+        if not np.isclose(sessions[train_name].sfreq, sessions[test_name].sfreq, atol=1e-3):
+            raise ValueError("checkpoint replay requires matching train/test sampling frequencies")
+        s1_spikes = apply_encoder(
+            sessions[train_name].X, calibration, sfreq=sessions[train_name].sfreq
+        ).spikes
+        s2_spikes = apply_encoder(
+            sessions[test_name].X, calibration, sfreq=sessions[test_name].sfreq
+        ).spikes
 
         model = SNNFeatureExtractor(
             in_features=s1_spikes.shape[0],
@@ -267,7 +299,10 @@ class TrialReplayEngine:
         )
         model.load_state_dict(ckpt["model_state_dict"])
 
-        label_values = torch.as_tensor(ckpt.get("label_values", [1, 2, 3, 4]))
+        label_values = torch.as_tensor(ckpt["label_values"])
+        label_names = list(ckpt["label_names"])
+        if label_values.numel() != protos.shape[0] or len(label_names) != protos.shape[0]:
+            raise ValueError("checkpoint label mapping is incompatible with prototype count")
         s1_labels = torch.as_tensor(
             [torch.where(label_values == int(lbl))[0].item() for lbl in sessions[train_name].y],
             dtype=torch.long,
@@ -277,7 +312,6 @@ class TrialReplayEngine:
             dtype=torch.long,
         )
 
-        class_names = ["Left Hand", "Right Hand", "Both Feet", "Tongue"]
         return cls(
             model=model,
             initial_prototypes=protos,
@@ -285,7 +319,7 @@ class TrialReplayEngine:
             session1_labels=s1_labels,
             session2_spikes=s2_spikes,
             session2_labels=s2_labels,
-            class_names=class_names,
+            class_names=label_names,
             projection_method=projection_method,
             subject=subject,
         )

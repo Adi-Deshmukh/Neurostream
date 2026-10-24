@@ -32,6 +32,18 @@ def test_phase_a_trains_freezes_and_saves_artifacts(tmp_path):
     assert result.prototype_path.exists()
     assert torch.load(result.prototype_path, weights_only=True).shape == (4, 8)
     assert all(not parameter.requires_grad for parameter in result.model.parameters())
+    checkpoint = torch.load(result.checkpoint_path, weights_only=False)
+    assert checkpoint["label_values"] == [10, 20, 30, 40]
+    assert checkpoint["label_names"] == ["10", "20", "30", "40"]
+    assert set(checkpoint["preprocessing_contract"]) >= {
+        "sampling_frequency_hz",
+        "filter_settings",
+        "epoch_window_seconds",
+        "channel_order",
+        "normalization",
+        "band_definitions_hz",
+        "encoder_n_timesteps",
+    }
 
 
 def test_phase_a_seed_reproduces_metrics(tmp_path):

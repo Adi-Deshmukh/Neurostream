@@ -20,7 +20,7 @@ import numpy as np
 import torch
 
 from neurostream.data.loader import load_bnci2014_001
-from neurostream.data.spike_encoder import encode
+from neurostream.data.spike_encoder import apply_encoder, fit_encoder
 from neurostream.evaluation.metrics import (
     EvaluationMetrics,
     format_metrics_table,
@@ -123,9 +123,18 @@ def run_subject_cross_session(
     train_session = sessions[train_name]
     test_session = sessions[test_name]
 
-    # 2. Encode to spikes
-    train_spikes = encode(train_session.X).spikes
-    test_spikes = encode(test_session.X).spikes
+    if not np.isclose(train_session.sfreq, test_session.sfreq, atol=1e-3):
+        raise ValueError(
+            "cross-session evaluation requires matching sampling frequencies; "
+            f"got {train_session.sfreq} Hz and {test_session.sfreq} Hz"
+        )
+    calibration = fit_encoder(train_session.X, sfreq=train_session.sfreq)
+    train_spikes = apply_encoder(
+        train_session.X, calibration, sfreq=train_session.sfreq
+    ).spikes
+    test_spikes = apply_encoder(
+        test_session.X, calibration, sfreq=test_session.sfreq
+    ).spikes
 
     # 3. Phase A: Supervised training & freezing
     in_features = train_spikes.shape[0]
@@ -133,6 +142,11 @@ def run_subject_cross_session(
 
     save_dir = Path(checkpoint_dir) if checkpoint_dir is not None else Path("results/checkpoints/sweep") / f"sub_{subject}_seed_{seed}"
 
+    event_names = {
+        int(item["event_code"]): str(item["event"])
+        for item in train_session.metadata
+        if "event_code" in item and "event" in item
+    }
     phase_a = train_phase_a(
         train_spikes,
         train_session.y,
@@ -147,6 +161,24 @@ def run_subject_cross_session(
         augmentation_probability=augmentation_probability,
         model=model,
         checkpoint_dir=save_dir,
+        encoder_calibration=calibration,
+        label_names=[
+            event_names.get(int(value), str(value))
+            for value in np.unique(train_session.y)
+        ],
+        preprocessing_contract={
+            "sampling_frequency_hz": train_session.sfreq,
+            "filter_settings": {
+                "l_freq_hz": train_session.l_freq,
+                "h_freq_hz": train_session.h_freq,
+                "order": 4,
+            },
+            "epoch_window_seconds": {
+                "tmin": train_session.tmin,
+                "tmax": train_session.tmax,
+            },
+            "channel_order": list(train_session.channel_names),
+        },
     )
 
     # 4. Measure Neuromorphic Spike Sparsity via Forward Hooks

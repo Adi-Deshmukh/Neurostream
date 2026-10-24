@@ -34,6 +34,22 @@ streamlit run dashboard/app.py
 ```
 Then navigate to `http://localhost:8501` in your browser.
 
+### Preprocessing and calibration contract
+
+The current pipeline is **offline and epoch-based**. Preprocessing uses a
+zero-phase `sosfiltfilt` band-pass, so each sample may depend on future samples
+within its epoch; it is not a causal sample-by-sample streaming filter and has
+no streaming latency guarantee. A causal filter with carried state must be
+implemented and validated before using this path for live raw-sample inference.
+
+Phase A fits rate-encoding thresholds only on Session 1 training data. Those
+thresholds, the true sampling frequency, filter and epoch settings, channel
+order, normalization, frequency bands, label mapping, and timestep count are
+stored in the checkpoint. Validation, held-out evaluation, dashboard replay,
+and Phase B load that contract and apply it unchanged. Mismatched sampling
+rates or channel contracts are rejected rather than silently using the 250 Hz
+default.
+
 ---
 
 ## 📖 Component-by-Component Dashboard Guide

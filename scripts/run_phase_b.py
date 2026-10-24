@@ -4,9 +4,10 @@ import argparse
 import pickle
 
 import torch
+import numpy as np
 
 from neurostream.data.loader import load_bnci2014_001
-from neurostream.data.spike_encoder import encode
+from neurostream.data.spike_encoder import EncoderCalibration, apply_encoder
 from neurostream.models.snn_feature_extractor import SNNFeatureExtractor
 from neurostream.training.phase_b_adapt import adapt_target_session, calibrate_target_session
 
@@ -36,8 +37,28 @@ def main() -> None:
 	sessions = load_bnci2014_001(subjects=args.subject)
 	train_name = next(name for name in sessions if "train" in name.lower())
 	test_name = next(name for name in sessions if "test" in name.lower())
-	train_spikes = encode(sessions[train_name].X).spikes
-	test_spikes = encode(sessions[test_name].X).spikes
+	required = ("encoder_calibration", "label_values", "label_names", "preprocessing_contract")
+	missing = [key for key in required if key not in checkpoint or checkpoint[key] is None]
+	if missing:
+		raise ValueError(f"checkpoint is missing the preprocessing/label contract: {', '.join(missing)}")
+	if not np.isclose(sessions[train_name].sfreq, sessions[test_name].sfreq, atol=1e-3):
+		raise ValueError("Phase B requires matching train/test sampling frequencies")
+	payload = checkpoint["encoder_calibration"]
+	calibration = EncoderCalibration(
+		alpha_thresholds=np.asarray(payload["alpha_thresholds"]),
+		beta_thresholds=np.asarray(payload["beta_thresholds"]),
+		sfreq=float(payload["sfreq"]),
+		n_timesteps=int(payload["n_timesteps"]),
+		rate_threshold_pct=float(payload["rate_threshold_pct"]),
+		channel_count=int(payload["channel_count"]),
+		filter_order=int(payload.get("filter_order", 4)),
+	)
+	train_spikes = apply_encoder(
+		sessions[train_name].X, calibration, sfreq=sessions[train_name].sfreq
+	).spikes
+	test_spikes = apply_encoder(
+		sessions[test_name].X, calibration, sfreq=sessions[test_name].sfreq
+	).spikes
 	model = SNNFeatureExtractor(
 		in_features=train_spikes.shape[0],
 		out_features=int(checkpoint["feature_dim"]),
@@ -45,6 +66,8 @@ def main() -> None:
 	model.load_state_dict(checkpoint["model_state_dict"])
 	prototypes = torch.load(args.prototypes, map_location="cpu", weights_only=True)
 	label_values = torch.as_tensor(checkpoint["label_values"])
+	if prototypes.shape[0] != len(checkpoint["label_names"]) or label_values.numel() != prototypes.shape[0]:
+		raise ValueError("checkpoint labels are incompatible with prototype count")
 	test_labels = torch.as_tensor(
 		[torch.where(label_values == int(label))[0].item() for label in sessions[test_name].y],
 		dtype=torch.long,

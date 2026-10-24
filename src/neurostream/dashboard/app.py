@@ -548,14 +548,30 @@ with tab_cross_subject:
         c_p = Path(f"results/checkpoints/phase_a_subject_{s}.pt")
         if c_p.exists():
             data = torch.load(c_p, map_location="cpu", weights_only=False)
+            required_contract = (
+                "label_values",
+                "label_names",
+                "encoder_calibration",
+                "preprocessing_contract",
+            )
+            missing_contract = [key for key in required_contract if not data.get(key)]
+            if missing_contract:
+                st.error(
+                    f"Subject S{s:02d} checkpoint rejected: missing "
+                    f"{', '.join(missing_contract)}."
+                )
+                continue
+            if len(data["label_values"]) != len(data["label_names"]):
+                st.error(f"Subject S{s:02d} checkpoint rejected: invalid label mapping.")
+                continue
             table_data.append({
                 "Subject": f"Subject S{s:02d}",
                 "Phase A Train": f"{data.get('train_accuracy', 0)*100:.2f}%",
                 "Phase A Val": f"{data.get('validation_accuracy', 0)*100:.2f}%",
                 "Phase A Test": f"{data.get('test_accuracy', 0)*100:.2f}%",
                 "Linear Head Baseline": f"{(data.get('linear_head_test_accuracy') or 0)*100:.2f}%",
-                "Feature Dim": data.get("feature_dim", 128),
-                "Classes": len(data.get("label_values", [1, 2, 3, 4])),
+                "Feature Dim": data["feature_dim"],
+                "Classes": len(data["label_values"]),
             })
 
     df_results = pd.DataFrame(table_data)

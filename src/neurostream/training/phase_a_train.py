@@ -38,11 +38,17 @@ def _as_spike_tensor(spikes: np.ndarray | torch.Tensor) -> torch.Tensor:
 	tensor = torch.as_tensor(spikes, dtype=torch.float32)
 	if tensor.ndim != 3:
 		raise ValueError("spikes must have shape (channels, timesteps, trials)")
+	if min(tensor.shape) < 1:
+		raise ValueError("spikes must contain at least one channel, timestep, and trial")
+	if not torch.isfinite(tensor).all():
+		raise ValueError("spikes must contain only finite values")
 	return tensor
 
 
 def _encode_labels(labels: np.ndarray | torch.Tensor) -> tuple[torch.Tensor, np.ndarray]:
 	values = np.asarray(labels).reshape(-1)
+	if values.size == 0 or not np.isfinite(values).all():
+		raise ValueError("labels must be non-empty and finite")
 	label_values = np.unique(values)
 	if label_values.size == 0:
 		raise ValueError("labels must not be empty")
@@ -283,6 +289,8 @@ def train_phase_a(
 	checkpoint_dir: str | Path = "results/checkpoints",
 	device: torch.device | str = "cpu",
 	encoder_calibration: object | None = None,  # EncoderCalibration | None
+	label_names: list[str] | None = None,
+	preprocessing_contract: dict[str, object] | None = None,
 ) -> PhaseAResult:
 	"""Train Phase A and save the frozen extractor and initial prototypes.
 
@@ -305,12 +313,16 @@ def train_phase_a(
 	_set_seed(seed)
 	train_x = _as_spike_tensor(train_spikes).to(device)
 	test_x  = _as_spike_tensor(test_spikes).to(device)
+	if train_x.shape[:2] != test_x.shape[:2]:
+		raise ValueError("train and test spikes must have matching channel and timestep dimensions")
 	train_y, label_values = _encode_labels(train_labels)
 	if len(label_values) != n_classes:
 		raise ValueError(
 			f"expected {n_classes} training classes, found {len(label_values)}"
 		)
 	test_values = np.asarray(test_labels).reshape(-1)
+	if test_values.size == 0 or not np.isfinite(test_values).all():
+		raise ValueError("test labels must be non-empty and finite")
 	if not np.isin(test_values, label_values).all():
 		raise ValueError("test labels contain classes absent from training labels")
 	test_y = torch.as_tensor(
@@ -374,13 +386,40 @@ def train_phase_a(
 	if encoder_calibration is not None:
 		from neurostream.data.spike_encoder import EncoderCalibration
 		if isinstance(encoder_calibration, EncoderCalibration):
+			if train_x.shape[0] != encoder_calibration.channel_count * 3:
+				raise ValueError("encoder calibration channel count does not match spike channels")
 			calibration_payload = {
 				"alpha_thresholds": encoder_calibration.alpha_thresholds,
 				"beta_thresholds":  encoder_calibration.beta_thresholds,
 				"sfreq":            encoder_calibration.sfreq,
 				"n_timesteps":      encoder_calibration.n_timesteps,
 				"rate_threshold_pct": encoder_calibration.rate_threshold_pct,
+				"channel_count": encoder_calibration.channel_count,
+				"filter_order": encoder_calibration.filter_order,
 			}
+		else:
+			raise TypeError("encoder_calibration must be an EncoderCalibration")
+	label_names = label_names or [str(value) for value in label_values.tolist()]
+	if len(label_names) != n_classes or len(set(label_names)) != n_classes:
+		raise ValueError("label_names must contain one unique name per class")
+	contract = dict(preprocessing_contract or {})
+	contract.setdefault("sampling_frequency_hz", (
+		encoder_calibration.sfreq if encoder_calibration is not None else None
+	))
+	contract.setdefault("encoder_n_timesteps", (
+		encoder_calibration.n_timesteps if encoder_calibration is not None else train_x.shape[1]
+	))
+	contract.setdefault("encoder_rate_threshold_pct", (
+		encoder_calibration.rate_threshold_pct if encoder_calibration is not None else None
+	))
+	contract.setdefault("channel_count", (
+		encoder_calibration.channel_count if encoder_calibration is not None else train_x.shape[0] // 3
+	))
+	contract.setdefault("channel_order", None)
+	contract.setdefault("filter_settings", {"l_freq_hz": 4.0, "h_freq_hz": 100.0, "order": 4})
+	contract.setdefault("epoch_window_seconds", {"tmin": 2.0, "tmax": 6.0})
+	contract.setdefault("normalization", "per-trial, per-channel z-score after baseline centering")
+	contract.setdefault("band_definitions_hz", {"alpha": [8.0, 13.0], "beta": [13.0, 30.0], "gamma": [30.0, 100.0]})
 
 	torch.save(
 		{
@@ -394,8 +433,10 @@ def train_phase_a(
 			"linear_head_test_accuracy": linear_test_accuracy,
 			"linear_head_train_accuracy": linear_train_accuracy,
 			"label_values": label_values.tolist(),
+			"label_names": label_names,
 			"feature_dim": network.out_features,
 			"encoder_calibration": calibration_payload,
+			"preprocessing_contract": contract,
 		},
 		checkpoint_path,
 	)
@@ -468,18 +509,26 @@ def train_subject(
 	train_sfreq = train_session.sfreq
 	test_sfreq  = test_session.sfreq
 	if abs(train_sfreq - test_sfreq) > 1e-3:
-		logger.warning(
-			"Train session sfreq (%.1f Hz) != test session sfreq (%.1f Hz). "
-			"Using train sfreq for encoder calibration.",
-			train_sfreq, test_sfreq,
+		raise ValueError(
+			"Train and test sessions have incompatible sampling frequencies: "
+			f"{train_sfreq} Hz vs {test_sfreq} Hz. Resample both sessions before training.",
 		)
 
 	# Step 1: fit calibration thresholds on training data ONLY.
 	calibration = fit_encoder(train_session.X, sfreq=train_sfreq)
 
 	# Step 2: apply pre-fitted thresholds to both splits (no re-fitting on test).
-	train_encoded = apply_encoder(train_session.X, calibration)
-	test_encoded  = apply_encoder(test_session.X,  calibration)
+	train_encoded = apply_encoder(train_session.X, calibration, sfreq=train_sfreq)
+	test_encoded  = apply_encoder(test_session.X, calibration, sfreq=test_sfreq)
+	train_label_names = {
+		int(item["event_code"]): str(item["event"])
+		for item in train_session.metadata
+		if "event_code" in item and "event" in item
+	}
+	label_names = [
+		train_label_names.get(int(value), str(value))
+		for value in np.unique(train_session.y)
+	]
 
 	_set_seed(seed)
 	model = SNNFeatureExtractor(
@@ -502,4 +551,18 @@ def train_subject(
 		checkpoint_dir=checkpoint_dir,
 		device=device,
 		encoder_calibration=calibration,
+		label_names=label_names,
+		preprocessing_contract={
+			"sampling_frequency_hz": train_sfreq,
+			"filter_settings": {
+				"l_freq_hz": train_session.l_freq,
+				"h_freq_hz": train_session.h_freq,
+				"order": 4,
+			},
+			"epoch_window_seconds": {
+				"tmin": train_session.tmin,
+				"tmax": train_session.tmax,
+			},
+			"channel_order": list(train_session.channel_names),
+		},
 	)
