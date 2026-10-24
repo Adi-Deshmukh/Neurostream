@@ -13,6 +13,7 @@ preprocessing:
   mode: offline_zero_phase_epoch
 
 encoder:
+  channel_count: 22
   timesteps: 20
   rate_threshold_pct: 75.0
   filter_order: 4

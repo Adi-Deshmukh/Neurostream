@@ -180,9 +180,9 @@ def test_format_metrics_table():
 
     table = format_metrics_table([record1, record2])
     assert "Section 5.4.1" in table
-    assert "Pre-Acc" in table
+    assert "Static" in table
     assert "Forget" in table
-    assert "Sparsity" in table
+    assert "Activity" in table
     assert "37.59%" in table
     assert "54.26%" in table
     assert "55.32%" in table

@@ -327,8 +327,8 @@ def format_metrics_table(
     lines.append(sep)
 
     header = (
-        f"{'Subj':<6} | {'Pre-Acc':<9} | {'Post-Acc':<9} | {'Gain':<8} | "
-        f"{'Init-Ret':<9} | {'Post-Ret':<9} | {'Forget':<8} | {'Sparsity':<9} | {'Consolid':<8}"
+        f"{'Subj':<6} | {'Static':<9} | {'Preq':<9} | {'Gain':<8} | "
+        f"{'Src-Before':<10} | {'Src-After':<9} | {'Forget':<8} | {'Activity':<9} | {'Consolid':<8}"
     )
     lines.append(header)
     lines.append(subsep)

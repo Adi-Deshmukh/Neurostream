@@ -20,14 +20,14 @@ def main() -> None:
     parser.add_argument("--quick", action="store_true", help="Fast smoke-test: 1 subject × 1 seed, 5 epochs")
     parser.add_argument("--subjects", nargs="+", type=int, default=list(range(1, 10)))
     parser.add_argument("--seeds", nargs="+", type=int, default=[42, 123, 456, 789, 999])
-    parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--learning-rate", type=float, default=1e-3)
-    parser.add_argument("--momentum", type=float, default=0.95, help="Frozen adaptation momentum across subjects")
-    parser.add_argument("--confidence-threshold", type=float, default=0.8)
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--learning-rate", type=float, default=None)
+    parser.add_argument("--momentum", type=float, default=None, help="Frozen adaptation momentum across subjects")
+    parser.add_argument("--confidence-threshold", type=float, default=None)
     parser.add_argument("--enable-consolidation", action="store_true", default=True)
     parser.add_argument("--no-consolidation", action="store_false", dest="enable_consolidation")
-    parser.add_argument("--output-csv", default="results/logs/cross_session_sweep.csv")
+    parser.add_argument("--output-csv", default=None)
     parser.add_argument("--config", default="configs/config.yaml")
     args = parser.parse_args()
     config = load_config(args.config)
@@ -43,8 +43,8 @@ def main() -> None:
     else:
         subjects = args.subjects
         seeds = args.seeds
-        epochs = args.epochs
-        output_csv = args.output_csv
+        epochs = args.epochs or config.training_epochs
+        output_csv = args.output_csv or str(config.output_log_dir / "cross_session_sweep.csv")
 
     sweep = run_cross_session_sweep(
         subjects=subjects,
@@ -54,6 +54,11 @@ def main() -> None:
         learning_rate=args.learning_rate or config.training_learning_rate,
         momentum=args.momentum or config.adaptation_momentum,
         confidence_threshold=args.confidence_threshold or config.evaluation_confidence_threshold,
+        hidden=config.model_hidden,
+        model_beta=config.model_beta,
+        model_threshold=config.model_threshold,
+        encoder_timesteps=config.encoder_timesteps,
+        encoder_rate_threshold_pct=config.encoder_rate_threshold_pct,
         enable_consolidation=args.enable_consolidation,
         output_csv=output_csv,
         checkpoint_dir=config.output_checkpoint_dir,

@@ -14,6 +14,8 @@ from __future__ import annotations
 import csv
 from dataclasses import asdict, dataclass
 import logging
+import json
+import statistics
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -115,6 +117,10 @@ def run_subject_cross_session(
     validation_fraction: float = 0.2,
     augmentation_probability: float = 0.2,
     hidden: int = 256,
+    model_beta: float = 0.9,
+    model_threshold: float = 0.5,
+    encoder_timesteps: int = 25,
+    encoder_rate_threshold_pct: float = 50.0,
     momentum: float = 0.95,
     confidence_threshold: float = 0.8,
     enable_consolidation: bool = True,
@@ -141,7 +147,12 @@ def run_subject_cross_session(
             "cross-session evaluation requires matching sampling frequencies; "
             f"got {train_session.sfreq} Hz and {test_session.sfreq} Hz"
         )
-    calibration = fit_encoder(train_session.X, sfreq=train_session.sfreq)
+    calibration = fit_encoder(
+        train_session.X,
+        sfreq=train_session.sfreq,
+        n_timesteps=encoder_timesteps,
+        rate_threshold_pct=encoder_rate_threshold_pct,
+    )
     train_spikes = apply_encoder(
         train_session.X, calibration, sfreq=train_session.sfreq
     ).spikes
@@ -151,7 +162,12 @@ def run_subject_cross_session(
 
     # 3. Phase A: Supervised training & freezing
     in_features = train_spikes.shape[0]
-    model = SNNFeatureExtractor(in_features=in_features, hidden=hidden)
+    model = SNNFeatureExtractor(
+        in_features=in_features,
+        hidden=hidden,
+        beta=model_beta,
+        threshold=model_threshold,
+    )
 
     save_dir = Path(checkpoint_dir) if checkpoint_dir is not None else Path("results/checkpoints/sweep") / f"sub_{subject}_seed_{seed}"
 
@@ -189,6 +205,18 @@ def run_subject_cross_session(
                 "tmax": train_session.tmax,
             },
             "channel_order": list(train_session.channel_names),
+            "effective_configuration": {
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "learning_rate": learning_rate,
+                "validation_fraction": validation_fraction,
+                "augmentation_probability": augmentation_probability,
+                "encoder_timesteps": encoder_timesteps,
+                "encoder_rate_threshold_pct": encoder_rate_threshold_pct,
+                "model_hidden": hidden,
+                "model_beta": model_beta,
+                "model_threshold": model_threshold,
+            },
         },
     )
     phase_a_eval = evaluate_phase_a(
@@ -275,7 +303,12 @@ def run_subject_cross_session(
             "batch_size": batch_size,
             "momentum": momentum,
             "confidence_threshold": confidence_threshold,
+            "encoder_timesteps": encoder_timesteps,
+            "encoder_rate_threshold_pct": encoder_rate_threshold_pct,
+            "model_beta": model_beta,
+            "model_threshold": model_threshold,
         },
+        run_id=f"subject-{subject}-seed-{seed}",
     )
     return result
 
@@ -290,6 +323,10 @@ def run_cross_session_sweep(
     validation_fraction: float = 0.2,
     augmentation_probability: float = 0.2,
     hidden: int = 256,
+    model_beta: float = 0.9,
+    model_threshold: float = 0.5,
+    encoder_timesteps: int = 25,
+    encoder_rate_threshold_pct: float = 50.0,
     momentum: float = 0.95,
     confidence_threshold: float = 0.8,
     enable_consolidation: bool = True,
@@ -315,6 +352,10 @@ def run_cross_session_sweep(
                 validation_fraction=validation_fraction,
                 augmentation_probability=augmentation_probability,
                 hidden=hidden,
+                model_beta=model_beta,
+                model_threshold=model_threshold,
+                encoder_timesteps=encoder_timesteps,
+                encoder_rate_threshold_pct=encoder_rate_threshold_pct,
                 momentum=momentum,
                 confidence_threshold=confidence_threshold,
                 enable_consolidation=enable_consolidation,
@@ -365,4 +406,103 @@ def run_cross_session_sweep(
             for r in runs:
                 writer.writerow(asdict(r))
 
+    manifest_root = Path(checkpoint_dir)
+    manifest_root.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "schema_version": 1,
+        "selection_required": True,
+        "runs": [
+            {
+                "subject": run.subject,
+                "seed": run.seed,
+                "checkpoint": str(
+                    manifest_root / f"sub_{run.subject}" / f"seed_{run.seed}"
+                    / f"phase_a_subject_{run.subject}.pt"
+                ),
+                "evaluation_artifact": str(
+                    manifest_root / f"sub_{run.subject}" / f"seed_{run.seed}"
+                    / f"evaluation_subject_{run.subject}.json"
+                ),
+            }
+            for run in runs
+        ],
+    }
+    (manifest_root / "evaluation_manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+    )
+
     return summary
+
+
+def run_consolidation_ablation(
+    subjects: Iterable[int],
+    seeds: Iterable[int],
+    *,
+    output_dir: str | Path = "results/ablations/consolidation",
+    **sweep_kwargs: Any,
+) -> dict[str, Any]:
+    """Run paired consolidation-on/off evaluations with identical subjects/seeds.
+
+    The two conditions use separate output directories, but otherwise share the
+    supplied protocol and configuration. Reported standard deviations describe
+    variability across the requested subject-seed runs; this is not a causal
+    hardware or clinical claim.
+    """
+    subjects = list(subjects)
+    seeds = list(seeds)
+    if not subjects or not seeds:
+        raise ValueError("subjects and seeds must not be empty")
+    root = Path(output_dir)
+    conditions: dict[str, SweepSummary] = {}
+    for enabled in (False, True):
+        condition = "enabled" if enabled else "disabled"
+        kwargs = dict(sweep_kwargs)
+        kwargs["checkpoint_dir"] = root / condition / "checkpoints"
+        kwargs["output_csv"] = root / condition / "results.csv"
+        kwargs["enable_consolidation"] = enabled
+        conditions[condition] = run_cross_session_sweep(
+            subjects=subjects, seeds=seeds, **kwargs
+        )
+
+    report: dict[str, Any] = {
+        "schema_version": 1,
+        "protocol": "paired_subject_seed_consolidation_ablation",
+        "subjects": subjects,
+        "seeds": seeds,
+        "conditions": {},
+    }
+    for condition, summary in conditions.items():
+        runs = [asdict(run) for run in summary.runs]
+        report["conditions"][condition] = {
+            "consolidation_enabled": condition == "enabled",
+            "settings": {
+                "consolidation_interval": sweep_kwargs.get("consolidation_interval", 50),
+                "sleep_steps": sweep_kwargs.get("sleep_steps", 5),
+                "noise_std": sweep_kwargs.get("noise_std", 0.05),
+                "pull_rate": sweep_kwargs.get("pull_rate", 0.5),
+            },
+            "runs": runs,
+            "mean_target_static_baseline": statistics.mean(
+                run["target_static_baseline_acc"] for run in runs
+            ),
+            "mean_target_prequential": statistics.mean(
+                run["target_prequential_acc"] for run in runs
+            ),
+            "mean_target_retrospective": statistics.mean(
+                run["target_retrospective_acc"] for run in runs
+            ),
+            "mean_source_retention": statistics.mean(
+                run["source_accuracy_after_adaptation"] for run in runs
+            ),
+            "std_target_prequential": statistics.pstdev(
+                run["target_prequential_acc"] for run in runs
+            ),
+            "std_source_retention": statistics.pstdev(
+                run["source_accuracy_after_adaptation"] for run in runs
+            ),
+        }
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    return report

@@ -7,7 +7,11 @@ import numpy as np
 import pytest
 import torch
 
-from neurostream.evaluation.cross_session_eval import run_cross_session_sweep, run_subject_cross_session
+from neurostream.evaluation.cross_session_eval import (
+    run_consolidation_ablation,
+    run_cross_session_sweep,
+    run_subject_cross_session,
+)
 from neurostream.utils.seed import seed_everything, temp_seed
 
 
@@ -116,6 +120,10 @@ def test_cross_session_sweep_with_mock_dataset(tmp_path):
         dataset=mock_ds,
         output_csv=csv_file,
         checkpoint_dir=tmp_path / "checkpoints",
+        encoder_timesteps=10,
+        encoder_rate_threshold_pct=60.0,
+        model_beta=0.8,
+        model_threshold=0.4,
         hidden=32,
     )
 
@@ -127,6 +135,14 @@ def test_cross_session_sweep_with_mock_dataset(tmp_path):
     assert 0.0 <= run.spike_sparsity <= 1.0
     assert csv_file.exists()
     assert (tmp_path / "checkpoints" / "sub_1" / "seed_42" / "evaluation_subject_1.json").exists()
+    assert (tmp_path / "checkpoints" / "evaluation_manifest.json").exists()
+    checkpoint = torch.load(
+        tmp_path / "checkpoints" / "sub_1" / "seed_42" / "phase_a_subject_1.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert checkpoint["encoder_calibration"]["n_timesteps"] == 10
+    assert checkpoint["encoder_calibration"]["rate_threshold_pct"] == 60.0
 
     with csv_file.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -137,3 +153,26 @@ def test_cross_session_sweep_with_mock_dataset(tmp_path):
         assert "source_accuracy_after_adaptation" in rows[0]
         assert "spike_sparsity" in rows[0]
         assert "consolidation_phases" in rows[0]
+
+
+def test_consolidation_ablation_reports_paired_protocol(tmp_path):
+    report = run_consolidation_ablation(
+        subjects=[1],
+        seeds=[42],
+        output_dir=tmp_path / "ablation",
+        dataset=MockDataset(),
+        epochs=1,
+        batch_size=2,
+        validation_fraction=0.5,
+        hidden=16,
+    )
+    assert report["protocol"] == "paired_subject_seed_consolidation_ablation"
+    assert set(report["conditions"]) == {"enabled", "disabled"}
+    for condition in report["conditions"].values():
+        assert "mean_target_static_baseline" in condition
+        assert "mean_target_prequential" in condition
+        assert "mean_target_retrospective" in condition
+        assert "mean_source_retention" in condition
+        assert "std_source_retention" in condition
+        assert "settings" in condition
+    assert (tmp_path / "ablation" / "report.json").exists()

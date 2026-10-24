@@ -20,6 +20,7 @@ class ProjectConfig:
     filter_l_freq_hz: float
     filter_h_freq_hz: float
     encoder_timesteps: int
+    encoder_channel_count: int
     encoder_rate_threshold_pct: float
     encoder_filter_order: int
     model_in_features: int
@@ -59,6 +60,14 @@ def _fraction(value: Any, name: str) -> float:
     value = _positive(value, name)
     if value > 1:
         raise ValueError(f"{name} must be in (0, 1]")
+    return float(value)
+
+
+def _unit_interval(value: Any, name: str, *, exclusive_upper: bool = False) -> float:
+    value = _positive(value, name)
+    if value >= 1 if exclusive_upper else value > 1:
+        bound = "less than 1" if exclusive_upper else "at most 1"
+        raise ValueError(f"{name} must be in (0, {bound})")
     return float(value)
 
 
@@ -105,6 +114,15 @@ def load_config(path: str | Path = "configs/config.yaml") -> ProjectConfig:
         result = Path(value)
         return result if result.is_absolute() else (base / result).resolve()
 
+    encoder_channels = int(_positive(encoder.get("channel_count"), "encoder.channel_count", True))
+    model_in_features = int(_positive(model.get("in_features"), "model.in_features", True))
+    if model_in_features != encoder_channels * 3:
+        raise ValueError("model.in_features must equal encoder.channel_count * 3")
+    percentile = _positive(
+        encoder.get("rate_threshold_pct"), "encoder.rate_threshold_pct"
+    )
+    if percentile >= 100:
+        raise ValueError("encoder.rate_threshold_pct must be less than 100")
     return ProjectConfig(
         dataset_name=dataset_name,
         dataset_path=relative_path(data.get("dataset_path"), "data.dataset_path", True),
@@ -115,17 +133,22 @@ def load_config(path: str | Path = "configs/config.yaml") -> ProjectConfig:
         filter_l_freq_hz=float(l_freq),
         filter_h_freq_hz=float(h_freq),
         encoder_timesteps=int(_positive(encoder.get("timesteps"), "encoder.timesteps", True)),
-        encoder_rate_threshold_pct=float(_positive(encoder.get("rate_threshold_pct"), "encoder.rate_threshold_pct")),
+        encoder_channel_count=encoder_channels,
+        encoder_rate_threshold_pct=float(percentile),
         encoder_filter_order=int(_positive(encoder.get("filter_order"), "encoder.filter_order", True)),
-        model_in_features=int(_positive(model.get("in_features"), "model.in_features", True)),
+        model_in_features=model_in_features,
         model_hidden=int(_positive(model.get("hidden"), "model.hidden", True)),
         model_out_features=int(_positive(model.get("out_features"), "model.out_features", True)),
-        model_beta=_fraction(model.get("beta"), "model.beta"),
+        model_beta=_unit_interval(model.get("beta"), "model.beta", exclusive_upper=True),
         model_threshold=float(_positive(model.get("threshold"), "model.threshold")),
         training_epochs=int(_positive(training.get("epochs"), "training.epochs", True)),
         training_batch_size=int(_positive(training.get("batch_size"), "training.batch_size", True)),
         training_learning_rate=float(_positive(training.get("learning_rate"), "training.learning_rate")),
-        validation_fraction=_fraction(training.get("validation_fraction"), "training.validation_fraction"),
+        validation_fraction=_unit_interval(
+            training.get("validation_fraction"),
+            "training.validation_fraction",
+            exclusive_upper=True,
+        ),
         random_seed=int(_positive(training.get("seed"), "training.seed", True)),
         evaluation_confidence_threshold=_fraction(
             evaluation.get("confidence_threshold"), "evaluation.confidence_threshold"

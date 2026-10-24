@@ -1,10 +1,11 @@
 """NeuroStream Interactive Evaluation Dashboard.
 
-Professional research platform visualizing live signal drift, prototype trajectories,
-and online streaming adaptation across all 9 subjects from genuine experimental checkpoints.
+Professional research platform visualizing offline trial-by-trial replay, prototype
+trajectories, and online-style adaptation across all 9 subjects from checkpoints.
 """
 
 from pathlib import Path
+import json
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -152,12 +153,45 @@ subject_id = st.sidebar.selectbox(
     help="Select any of the 9 benchmark subjects. Loads real Phase A SNN weights and prototypes.",
 )
 
-ckpt_file = Path(f"results/checkpoints/phase_a_subject_{subject_id}.pt")
-proto_file = Path(f"results/checkpoints/prototypes_subject_{subject_id}.pt")
+manifest_path = Path("results/checkpoints/evaluation_manifest.json")
+selected_run = None
+manifest_runs_by_subject: dict[int, list[dict[str, object]]] = {}
+if manifest_path.exists():
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_runs = manifest.get("runs", [])
+        manifest_runs_by_subject = {
+            subject: [run for run in manifest_runs if int(run.get("subject", -1)) == subject]
+            for subject in range(1, 10)
+        }
+        subject_runs = [
+            run for run in manifest.get("runs", [])
+            if int(run.get("subject", -1)) == subject_id
+        ]
+        if subject_runs:
+            seeds = [int(run["seed"]) for run in subject_runs]
+            selected_seed = st.sidebar.selectbox(
+                "Evaluation seed",
+                options=seeds,
+                help="Select the exact checkpoint and held-out artifact run.",
+            )
+            selected_run = next(run for run in subject_runs if int(run["seed"]) == selected_seed)
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+        st.sidebar.error(f"Evaluation manifest rejected: {error}")
+
+if selected_run is not None:
+    ckpt_file = Path(selected_run["checkpoint"])
+    artifact_file = Path(selected_run["evaluation_artifact"])
+    proto_file = ckpt_file.with_name(f"prototypes_subject_{subject_id}.pt")
+else:
+    ckpt_file = Path(f"results/checkpoints/phase_a_subject_{subject_id}.pt")
+    proto_file = Path(f"results/checkpoints/prototypes_subject_{subject_id}.pt")
+    artifact_file = ckpt_file.parent / f"evaluation_subject_{subject_id}.json"
 
 if not ckpt_file.exists() or not proto_file.exists():
     st.sidebar.error(f"Checkpoint for Subject {subject_id} not found in results/checkpoints/")
     st.stop()
+checkpoint_data = torch.load(ckpt_file, map_location="cpu", weights_only=False)
 
 projection_type = st.sidebar.radio(
     "2D Reference Basis",
@@ -244,6 +278,31 @@ if measurement is None or measurement.checkpoint_ref != engine.checkpoint_ref:
     st.error("Current simulation measurements are unavailable or do not match the selected checkpoint.")
     measurement = None
 
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Run Provenance")
+st.sidebar.caption(f"Checkpoint: `{ckpt_file}`")
+st.sidebar.caption(f"Checkpoint SHA-256: `{engine.checkpoint_ref}`")
+if artifact_file.exists():
+    try:
+        selected_artifact = load_evaluation_artifact(
+            artifact_file, checkpoint_path=ckpt_file, subject=subject_id
+        )
+        st.sidebar.caption(f"Evaluation session: `{selected_artifact['evaluation_session']}`")
+        st.sidebar.caption(f"Protocol: `{selected_artifact['protocol']}`")
+        st.sidebar.caption(f"Evaluation run ID: `{selected_artifact['run_id']}`")
+        st.sidebar.caption(f"Artifact created: `{selected_artifact['created_at_utc']}`")
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+        st.sidebar.warning(f"Evaluation provenance unavailable: {error}")
+if measurement is not None:
+    st.sidebar.caption(f"Replay run ID: `{measurement.run_id}`")
+    st.sidebar.caption(f"Measurement time: `{measurement.measured_at_utc}`")
+
+encoder_metadata = checkpoint_data.get("encoder_calibration", {})
+encoder_timesteps = encoder_metadata.get("n_timesteps")
+encoder_channels = encoder_metadata.get("channel_count")
+if encoder_timesteps is None or encoder_channels is None:
+    st.error("Selected checkpoint lacks encoder timestep/channel metadata.")
+
 
 def _format_activity(value: float | None) -> str:
     if value is None or not np.isfinite(value):
@@ -255,9 +314,9 @@ total_steps = len(sim_data.steps)
 # ── Primary View Tabs ────────────────────────────────────────────────────────
 
 tab_replay, tab_cross_subject, tab_architecture, tab_guide = st.tabs([
-    "🎯 Live Streaming Replay",
+    "🎯 Offline Trial Replay",
     "📊 Cross-Subject Benchmarks (Table 5)",
-    "⚡ Neuromorphic Energy & Sparsity",
+    "⚡ Measured Spike Activity",
     "📖 Platform Guide & Theory",
 ])
 
@@ -319,12 +378,12 @@ with tab_replay:
         delta=f"Drift: {current_record.drift_loss:.4f}" if current_record.sleep_consolidation_triggered else "Stable",
     )
     m_col5.metric(
-        "NETWORK SPARSITY",
+        "NETWORK SPIKE ACTIVITY",
         _format_activity(
             measurement.aggregate_activity_fraction if measurement is not None else None
         ),
-        delta=">90% Silence (Zero Power)",
-        delta_color="inverse",
+        delta="Measured fraction of spike opportunities",
+        delta_color="off",
     )
 
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
@@ -554,11 +613,19 @@ with tab_replay:
 # =============================================================================
 with tab_cross_subject:
     st.markdown("### 📊 Cross-Subject Experimental Results (Table 5)")
-    st.caption("All metrics are loaded directly from trained PyTorch checkpoints and verified baseline logs across all 9 subjects.")
+    st.caption("Metrics are loaded from hash-validated held-out evaluation artifacts; synthetic smoke-test outputs are not benchmark evidence.")
 
     table_data = []
     for s in range(1, 10):
         c_p = Path(f"results/checkpoints/phase_a_subject_{s}.pt")
+        subject_manifest_runs = manifest_runs_by_subject.get(s, [])
+        if subject_manifest_runs:
+            if s == subject_id and selected_run is not None:
+                subject_manifest_runs = [selected_run]
+            elif len(subject_manifest_runs) != 1:
+                st.info(f"Subject S{s:02d}: select a seed in the sidebar to inspect this run.")
+                continue
+            c_p = Path(subject_manifest_runs[0]["checkpoint"])
         if c_p.exists():
             data = torch.load(c_p, map_location="cpu", weights_only=False)
             required_contract = (
@@ -577,7 +644,16 @@ with tab_cross_subject:
             if len(data["label_values"]) != len(data["label_names"]):
                 st.error(f"Subject S{s:02d} checkpoint rejected: invalid label mapping.")
                 continue
-            artifact_path = c_p.parent / f"evaluation_subject_{s}.json"
+            if subject_manifest_runs:
+                manifest_run = subject_manifest_runs[0]
+                c_p = Path(manifest_run["checkpoint"])
+                artifact_path = Path(manifest_run["evaluation_artifact"])
+                if not c_p.exists():
+                    st.info(f"Subject S{s:02d}: selected checkpoint is unavailable.")
+                    continue
+                data = torch.load(c_p, map_location="cpu", weights_only=False)
+            else:
+                artifact_path = artifact_file if s == subject_id else c_p.parent / f"evaluation_subject_{s}.json"
             if not artifact_path.exists():
                 st.info(f"Subject S{s:02d}: held-out evaluation has not been run.")
                 continue
@@ -668,15 +744,15 @@ with tab_cross_subject:
 # TAB 3: NEUROMORPHIC ENERGY & SPARSITY
 # =============================================================================
 with tab_architecture:
-    st.markdown("### ⚡ Neuromorphic Energy Efficiency & Sparsity Validation")
-    st.caption("Measured spike activity from the replay model; this is not a direct energy measurement.")
+    st.markdown("### ⚡ Measured Spike Activity")
+    st.caption("Offline, trial-by-trial replay using zero-phase epoch preprocessing; not a real-time BCI or direct energy measurement.")
 
     c1, c2 = st.columns(2)
     with c1:
         st.markdown(
             f"""
             #### Real Empirical Measurements
-            - **Input Spike Encoding:** 22 Channels × 3 Frequency Bands = **66 Virtual Channels** over **25 Timesteps**.
+            - **Input Spike Encoding:** {encoder_channels or 'N/A'} EEG channels × 3 configured frequency bands = **{encoder_channels * 3 if encoder_channels else 'N/A'} Virtual Channels** over **{encoder_timesteps or 'N/A'} Timesteps**.
             - **Spike Encoder Activity:** Alpha/Beta rate coding + Gamma TTFS measured on replay input.
             - **LIF layer activity fraction:** **{_format_activity(measurement.layer_activity_fraction.get('lif1') if measurement else None)}**.
             - **LIF layer activity fraction:** **{_format_activity(measurement.layer_activity_fraction.get('lif2') if measurement else None)}**.
@@ -685,8 +761,8 @@ with tab_architecture:
             ---
             
             #### Interpretation
-            These values report observed spike firing rates and duty cycle for
-            this model/input replay only. Hardware energy and savings require a
+            These values report observed spike activity fractions for this
+            offline trial-by-trial replay only. Hardware energy and savings require a
             defined device, workload, measurement protocol, and baseline.
             """
         )

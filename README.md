@@ -10,7 +10,7 @@
 
 ## 🚀 Key Architectural Contributions
 
-1. **Zero Raw-Data Storage Privacy**: Once Session 1 training completes, raw EEG signals are permanently discarded. During Session 2 streaming, catastrophic forgetting is mitigated by generating synthetic noisy feature vectors ($\tilde{P} = P_{\text{snapshot}} + \mathcal{N}(0, \sigma^2 I)$) around stored prototype snapshots.
+1. **Zero Raw-Data Storage Privacy**: Once Session 1 training completes, raw EEG signals are permanently discarded. During Session 2 replay, the implementation can generate synthetic noisy feature vectors ($\tilde{P} = P_{\text{snapshot}} + \mathcal{N}(0, \sigma^2 I)$) around stored prototype snapshots. This mechanism requires paired ablation results before making claims about preventing catastrophic forgetting.
 2. **Measured Spike Activity**: Forward hooks report LIF firing rates and neuron-timestep activity for the configured model and workload. These measurements are not direct hardware-energy measurements.
 3. **Fixed-Manifold 2D Reference**: High-dimensional feature trajectories are stably projected into an invariant Session 1 basis (PCA/UMAP), eliminating coordinate jitter during live streaming adaptation.
 4. **Frozen Synaptic Weights**: Synaptic weights $\Theta$ are frozen after Phase A, eliminating computationally expensive online backpropagation on edge devices.
@@ -19,7 +19,7 @@
 
 ## 🖥️ Interactive Evaluation Platform & Dashboard
 
-The project includes an interactive research dashboard built with Streamlit and Plotly, exposing live signal drift, prototype movements, and empirical multi-subject benchmarks.
+The project includes an interactive research dashboard built with Streamlit and Plotly, exposing offline trial-by-trial replay, prototype movements, and empirical multi-subject benchmarks. It is not a causal real-time BCI.
 
 ### Launching the Dashboard
 
@@ -64,7 +64,7 @@ This section explains what every widget, control, metric card, and visualization
 | **2D Reference Basis** | Switch between **PCA** (Linear principal axes) and **UMAP** (Manifold projection). | Fits the 2D coordinate system once on Session 1 features. Session 2 trials and live prototypes project into this space to avoid frame jitter. |
 | **Prototype Momentum ($1 - \alpha$)** | Slider $[0.50, 0.99]$, default $0.90$. | Controls the Exponential Moving Average inertia: $P_c^{(t)} = \mu P_c^{(t-1)} + (1 - \mu) f_t$. Higher values make prototype movement gradual; lower values adapt aggressively. |
 | **Confidence Threshold ($\tau$)** | Slider $[0.25, 0.95]$, default $0.60$. | Minimum cosine softmax confidence required to update prototype memory. Prevents noisy or misclassified trials from corrupting prototypes. |
-| **Sleep Consolidation Toggle** | Checkbox (`ON` by default). | Periodically generates synthetic Gaussian features around initial snapshots to pull drifted prototypes back and protect Session 1 retention. |
+| **Sleep Consolidation Toggle** | Checkbox (`ON` by default). | Periodically generates synthetic Gaussian features around initial snapshots to pull drifted prototypes back. Retention benefit must be established by the paired ablation report. |
 | **Consolidation Interval** | Number input (e.g. 25 trials). | Frequency of sleep consolidation phases (every $N$ accepted trials). |
 | **Pull Strength ($\lambda$)** | Slider $[0.1, 1.0]$, default $0.5$. | Weighting of the gradient-free pull toward the snapshot: $P_c \leftarrow (1 - \lambda) P_c + \lambda P_{\text{snapshot}, c}$. |
 
@@ -73,10 +73,11 @@ This section explains what every widget, control, metric card, and visualization
 ### 2. Top Metrics Ribbon
 
 - **STREAMED TRIALS**: Displays the current position in the Session 2 trial sequence (e.g., $142 / 282$) along with a visual progress bar.
-- **STREAMING ACCURACY**: Cumulative accuracy of the adapting SNN model from trial $1$ to the current trial. Includes a green delta badge showing accuracy gain over the unadapted static SNN baseline.
+- **PREQUENTIAL ACCURACY**: Cumulative target accuracy from predictions made before each trial's update. Its gain over the static target baseline is the online-style adaptation metric.
+- **RETROSPECTIVE DIAGNOSTIC**: Target accuracy scored after the complete replay using final prototypes. It is reported separately and is never used for online adaptation gain.
 - **TRIAL ADAPTATION**: Displays **ACCEPTED** (prototype was updated) if trial confidence $\ge \tau$, or **FILTERED** (trial rejected from prototype update). Shows exact softmax cosine confidence.
 - **SLEEP CONSOLIDATION**: Displays **TRIGGERED 🌙** when synthetic anchor correction fires, showing the measured cosine drift loss ($L_{\text{sleep}} = 1 - \cos(P_{\text{curr}}, P_{\text{snapshot}})$).
-- **NETWORK SPARSITY**: The measured fraction of neuron timesteps that fired spikes across both LIF layers ($~7.94\%$), proving **>92% silence**.
+- **NETWORK SPIKE ACTIVITY**: The measured fraction of neuron-timestep opportunities that fired during the selected offline replay. This is not a zero-power or energy-saving claim.
 
 ---
 
@@ -102,7 +103,7 @@ This section explains what every widget, control, metric card, and visualization
 #### C. Plot 2: Online Adaptation vs. Static SNN Baseline Curves
 - **Top Subplot (Accuracy Comparison)**:
   - **Blue Solid Line**: Running cumulative accuracy of our **Adaptive SNN**.
-  - **Grey Dotted Line**: Accuracy of the **Static SNN Baseline** (frozen prototypes without online adaptation). Demonstrates how adaptation actively counters sensor degradation and subject fatigue.
+  - **Grey Dotted Line**: Accuracy of the **Static SNN Baseline** (frozen prototypes without adaptation). It is a comparison condition, not evidence that adaptation counters sensor degradation or subject fatigue.
 - **Bottom Subplot (Confidence & Threshold)**:
   - **Amber Line**: Per-trial classification confidence.
   - **Red Dashed Line**: The acceptance threshold $\tau$. Trials above this line trigger prototype updates.
@@ -126,7 +127,24 @@ Displays genuine experimental results loaded directly from our 9 trained checkpo
    - **Retrospective Diagnostic**: Target accuracy scored after all online updates; this is not an online metric.
    - **Source Accuracy After**: Source-session retention measured with the adapted prototypes.
 2. **Comparison Bar Chart**: Side-by-side visualization of static target baseline and prequential adaptation from matching evaluation artifacts.
-3. **Generalization Gap Profile**: Multi-line plot tracking the performance trajectory from Train $\rightarrow$ Validation $\rightarrow$ Held-Out Target.
+3. **Generalization Gap Profile**: Multi-line plot tracking Train $\rightarrow$ Validation $\rightarrow$ Held-Out Target prequential accuracy; retrospective accuracy remains a separate diagnostic.
+
+### Result provenance and evidence classes
+
+The dashboard exposes the selected checkpoint path and hash, evaluation session,
+run ID, protocol, artifact timestamp, and replay measurement run ID. Benchmark
+metrics are valid only when the artifact hash matches the selected checkpoint.
+Synthetic end-to-end tests establish shape, serialization, determinism, and
+protocol contracts; they are not BCI performance results. BNCI2014-001 results
+must be generated by the cross-session evaluation scripts and are reported
+separately from smoke tests. No hardware energy or latency result is reported
+without a device, workload, baseline, and measurement protocol.
+
+Run paired consolidation ablations with the same subject and seed sets using
+`run_consolidation_ablation(...)`. The report includes target static,
+prequential, and retrospective metrics, source retention, run-level standard
+deviations, and the exact consolidation settings for enabled and disabled
+conditions.
 
 ---
 

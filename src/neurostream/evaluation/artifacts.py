@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
 SCHEMA_VERSION = 1
+REQUIRED_METRICS = frozenset({
+    "target_static_baseline_acc",
+    "target_prequential_acc",
+    "target_retrospective_acc",
+    "source_accuracy_after_adaptation",
+})
 
 
 def checkpoint_hash(path: str | Path) -> str:
@@ -27,8 +34,10 @@ def save_evaluation_artifact(
     label_values: list[int],
     label_names: list[str],
     run_config: dict[str, Any],
+    run_id: str | None = None,
 ) -> Path:
     """Write a self-identifying held-out evaluation result."""
+    _validate_metrics(metrics)
     checkpoint_path = Path(checkpoint_path)
     artifact = {
         "schema_version": SCHEMA_VERSION,
@@ -43,6 +52,8 @@ def save_evaluation_artifact(
         "label_names": list(label_names),
         "metrics": metrics,
         "run_config": run_config,
+        "run_id": run_id or f"subject-{subject}-seed-{run_config.get('seed', 'unknown')}",
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
     }
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -62,6 +73,7 @@ def load_evaluation_artifact(
         "schema_version", "checkpoint_sha256", "subject", "train_session",
         "evaluation_session", "split_identity", "protocol", "label_values",
         "label_names", "metrics", "run_config",
+        "run_id", "created_at_utc",
     }
     missing = required.difference(artifact)
     if missing:
@@ -76,6 +88,19 @@ def load_evaluation_artifact(
         raise ValueError("evaluation artifact subject does not match selection")
     if len(artifact["label_values"]) != len(artifact["label_names"]):
         raise ValueError("evaluation artifact label mapping is invalid")
-    if not isinstance(artifact["metrics"], dict):
-        raise ValueError("evaluation artifact metrics must be an object")
+    _validate_metrics(artifact["metrics"])
     return artifact
+
+
+def _validate_metrics(metrics: Any) -> None:
+    if not isinstance(metrics, dict):
+        raise ValueError("evaluation artifact metrics must be an object")
+    missing = REQUIRED_METRICS.difference(metrics)
+    if missing:
+        raise ValueError(f"evaluation artifact is missing metrics: {sorted(missing)}")
+    for name in REQUIRED_METRICS:
+        value = metrics[name]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"evaluation metric {name} must be numeric")
+        if not 0 <= float(value) <= 1:
+            raise ValueError(f"evaluation metric {name} must be in [0, 1]")
