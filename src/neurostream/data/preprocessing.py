@@ -13,6 +13,54 @@ MOTOR_IMAGERY_EVENT_ALIASES = {
 }
 
 
+class EEGChannelNormalizer:
+	"""Training-fitted channel scaling shared by every evaluation session."""
+
+	def __init__(self, epsilon: float = 1e-6) -> None:
+		if not np.isfinite(epsilon) or epsilon <= 0:
+			raise ValueError("epsilon must be finite and positive")
+		self.epsilon = float(epsilon)
+		self.mean_: np.ndarray | None = None
+		self.std_: np.ndarray | None = None
+
+	def fit(self, epochs: np.ndarray) -> "EEGChannelNormalizer":
+		epochs = _validate_epochs(epochs)
+		self.mean_ = epochs.mean(axis=(0, 2), keepdims=True).astype(np.float32)
+		self.std_ = np.maximum(
+			epochs.std(axis=(0, 2), keepdims=True), self.epsilon
+		).astype(np.float32)
+		return self
+
+	def transform(self, epochs: np.ndarray) -> np.ndarray:
+		epochs = _validate_epochs(epochs)
+		if self.mean_ is None or self.std_ is None:
+			raise RuntimeError("normalizer must be fitted before transform")
+		if epochs.shape[1] != self.mean_.shape[1]:
+			raise ValueError("EEG channel count mismatch")
+		return ((epochs - self.mean_) / self.std_).astype(np.float32, copy=False)
+
+	def payload(self) -> dict[str, Any]:
+		if self.mean_ is None or self.std_ is None:
+			raise RuntimeError("normalizer must be fitted before serialization")
+		return {
+			"method": "training_fitted_channel_zscore",
+			"epsilon": self.epsilon,
+			"mean": self.mean_.reshape(-1).tolist(),
+			"std": self.std_.reshape(-1).tolist(),
+		}
+
+
+def _validate_epochs(epochs: np.ndarray) -> np.ndarray:
+	epochs = np.asarray(epochs, dtype=np.float32)
+	if epochs.ndim != 3:
+		raise ValueError("epochs must have shape (trials, channels, samples)")
+	if min(epochs.shape) < 1:
+		raise ValueError("epochs must contain at least one trial, channel, and sample")
+	if not np.isfinite(epochs).all():
+		raise ValueError("epochs must contain only finite values")
+	return epochs
+
+
 def bandpass_filter(
 	data: np.ndarray, sfreq: float, l_freq: float = 4.0, h_freq: float = 100.0
 ) -> np.ndarray:
@@ -39,12 +87,7 @@ def bandpass_filter(
 
 def zscore_channels(epochs: np.ndarray, epsilon: float = 1e-8) -> np.ndarray:
 	"""Z-score each channel independently within each trial."""
-	if epochs.ndim != 3:
-		raise ValueError("epochs must have shape (trials, channels, samples)")
-	if epochs.shape[0] < 1 or epochs.shape[1] < 1 or epochs.shape[2] < 1:
-		raise ValueError("epochs must contain at least one trial, channel, and sample")
-	if not np.isfinite(epochs).all():
-		raise ValueError("epochs must contain only finite values")
+	epochs = _validate_epochs(epochs)
 	mean = epochs.mean(axis=-1, keepdims=True)
 	std = epochs.std(axis=-1, keepdims=True)
 	return ((epochs - mean) / np.maximum(std, epsilon)).astype(np.float32, copy=False)
@@ -57,8 +100,9 @@ def preprocess_session(
 	tmax: float = 6.0,
 	l_freq: float = 4.0,
 	h_freq: float = 100.0,
+	normalization: str = "demean",
 ) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]]]:
-	"""Convert one MNE Raw run into normalized EEG trials and metadata.
+	"""Convert one MNE Raw run into demeaned EEG trials and metadata.
 
 	For BNCI2014-001, MOABB's trigger events represent trial start. The
 	experiment presents the class cue two seconds later and ends imagery at
@@ -110,7 +154,13 @@ def preprocess_session(
 	if data.ndim != 3 or data.shape[0] == 0:
 		raise ValueError("preprocessing produced no valid epochs")
 	data -= data.mean(axis=-1, keepdims=True)
-	data = zscore_channels(data)
+	data = data.astype(np.float32, copy=False)
+	if normalization == "per_trial_zscore":
+		data = zscore_channels(data)
+	elif normalization != "demean":
+		raise ValueError(
+			"normalization must be 'demean' or 'per_trial_zscore'"
+		)
 	inverse_event_id = {code: label for label, code in epochs.event_id.items()}
 	class_counts = {
 		label: int(np.sum(epochs.events[:, 2] == code))

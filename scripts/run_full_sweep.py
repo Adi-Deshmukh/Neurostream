@@ -67,6 +67,7 @@ def main() -> None:
         cue_onset_offset_seconds=config.cue_onset_offset_seconds,
         filter_l_freq_hz=config.filter_l_freq_hz,
         filter_h_freq_hz=config.filter_h_freq_hz,
+        normalization=config.normalization,
         output_evaluation_dir=config.output_evaluation_dir,
         dataset_name=config.dataset_name,
         dataset_path=config.dataset_path,

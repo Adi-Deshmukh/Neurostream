@@ -21,6 +21,7 @@ class ProjectConfig:
     cue_onset_offset_seconds: float
     filter_l_freq_hz: float
     filter_h_freq_hz: float
+    normalization: str
     encoder_timesteps: int
     encoder_channel_count: int
     encoder_rate_threshold_pct: float
@@ -102,6 +103,16 @@ def load_config(path: str | Path = "configs/config.yaml") -> ProjectConfig:
     h_freq = _positive(preprocessing.get("filter_h_freq_hz"), "preprocessing.filter_h_freq_hz")
     if not l_freq < h_freq < sfreq / 2:
         raise ValueError("preprocessing filter cutoffs must satisfy 0 < low < high < Nyquist")
+    normalization = preprocessing.get("normalization")
+    if normalization not in {
+        "training_fitted_channel_zscore",
+        "per_trial_zscore",
+        "demean",
+    }:
+        raise ValueError(
+            "preprocessing.normalization must be training_fitted_channel_zscore, "
+            "per_trial_zscore, or demean"
+        )
     epoch_reference = data.get("epoch_reference")
     if epoch_reference != "trial_start":
         raise ValueError("data.epoch_reference must be 'trial_start' for BNCI2014_001")
@@ -142,6 +153,7 @@ def load_config(path: str | Path = "configs/config.yaml") -> ProjectConfig:
         cue_onset_offset_seconds=float(cue_offset),
         filter_l_freq_hz=float(l_freq),
         filter_h_freq_hz=float(h_freq),
+        normalization=normalization,
         encoder_timesteps=int(_positive(encoder.get("timesteps"), "encoder.timesteps", True)),
         encoder_channel_count=encoder_channels,
         encoder_rate_threshold_pct=float(percentile),

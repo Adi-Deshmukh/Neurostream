@@ -23,6 +23,7 @@ class SessionData:
 	h_freq: float = 100.0
 	epoch_reference: str = "trial_start"
 	trial_counts: dict[str, int] = field(default_factory=dict)
+	normalization: dict[str, Any] | None = None
 
 
 def load_bnci2014_001(
@@ -37,6 +38,7 @@ def load_bnci2014_001(
 	dataset_path: str | None = None,
 	cache_path: str | None = None,
 	epoch_reference: str = "trial_start",
+	normalization: str = "training_fitted_channel_zscore",
 ) -> dict[str, SessionData]:
 	"""Load BNCI2014_001 and return trials grouped by MOABB session.
 
@@ -107,7 +109,8 @@ def load_bnci2014_001(
 				)
 
 			X, y, run_metadata = preprocess_session(
-				raw, tmin=tmin, tmax=tmax, l_freq=l_freq, h_freq=h_freq
+				raw, tmin=tmin, tmax=tmax, l_freq=l_freq, h_freq=h_freq,
+				normalization="per_trial_zscore" if normalization == "per_trial_zscore" else "demean",
 			)
 			arrays.append(X)
 			labels.append(y)
@@ -133,6 +136,28 @@ def load_bnci2014_001(
 			epoch_reference=epoch_reference,
 			trial_counts=trial_counts,
 		)
+	from .preprocessing import EEGChannelNormalizer
+	train_name = next(
+		(name for name in result if "train" in name.lower()), next(iter(result), None)
+	)
+	if train_name is None:
+		raise ValueError("no sessions were available for normalization")
+	if normalization == "training_fitted_channel_zscore":
+		normalizer = EEGChannelNormalizer().fit(result[train_name].X)
+		for session in result.values():
+			session.X = normalizer.transform(session.X)
+		normalization_payload = normalizer.payload()
+	elif normalization == "per_trial_zscore":
+		normalization_payload = {"method": "per_trial_channel_zscore"}
+	elif normalization == "demean":
+		normalization_payload = {"method": "per_trial_demean_preserve_channel_scale"}
+	else:
+		raise ValueError(
+			"normalization must be 'training_fitted_channel_zscore', "
+			"'per_trial_zscore', or 'demean'"
+		)
+	for session in result.values():
+		session.normalization = normalization_payload
 	return result
 
 

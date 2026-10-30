@@ -129,6 +129,7 @@ def run_subject_cross_session(
     cue_onset_offset_seconds: float = 2.0,
     filter_l_freq_hz: float = 4.0,
     filter_h_freq_hz: float = 100.0,
+    normalization: str = "training_fitted_channel_zscore",
     output_evaluation_dir: str | Path | None = None,
     dataset_name: str = "BNCI2014_001",
     dataset_path: str | Path | None = None,
@@ -159,6 +160,7 @@ def run_subject_cross_session(
         l_freq=filter_l_freq_hz,
         h_freq=filter_h_freq_hz,
         epoch_reference=epoch_reference,
+        normalization=normalization,
     )
     train_name = next(name for name in sessions if "train" in name.lower())
     test_name = next(name for name in sessions if "test" in name.lower())
@@ -237,6 +239,7 @@ def run_subject_cross_session(
                 "cue_onset_offset_seconds": cue_onset_offset_seconds,
             },
             "channel_order": list(train_session.channel_names),
+            "normalization": train_session.normalization,
             "effective_configuration": {
                 "epochs": epochs,
                 "batch_size": batch_size,
@@ -259,6 +262,7 @@ def run_subject_cross_session(
                 "filter_h_freq_hz": filter_h_freq_hz,
                 "epoch_reference": epoch_reference,
                 "cue_onset_offset_seconds": cue_onset_offset_seconds,
+                "normalization": normalization,
             },
         },
     )
@@ -393,6 +397,7 @@ def run_cross_session_sweep(
     cue_onset_offset_seconds: float = 2.0,
     filter_l_freq_hz: float = 4.0,
     filter_h_freq_hz: float = 100.0,
+    normalization: str = "training_fitted_channel_zscore",
     model_out_features: int = 128,
     output_evaluation_dir: str | Path | None = None,
     dataset_name: str = "BNCI2014_001",
@@ -434,6 +439,7 @@ def run_cross_session_sweep(
                 cue_onset_offset_seconds=cue_onset_offset_seconds,
                 filter_l_freq_hz=filter_l_freq_hz,
                 filter_h_freq_hz=filter_h_freq_hz,
+                normalization=normalization,
                 model_out_features=model_out_features,
                 output_evaluation_dir=(
                     Path(output_evaluation_dir) / f"sub_{subj}" / f"seed_{seed}"

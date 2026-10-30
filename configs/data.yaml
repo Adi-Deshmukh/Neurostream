@@ -8,7 +8,7 @@ epoch_reference: trial_start
 cue_onset_offset_seconds: 2.0
 filter_l_freq_hz: 4.0
 filter_h_freq_hz: 100.0
-normalization: channelwise_zscore_per_trial
+normalization: training_fitted_channel_zscore
 session_split:
   training: train
   held_out: test
