@@ -1,6 +1,7 @@
 """Tests for reproducible seeding and cross-session sweep execution."""
 
 import csv
+import json
 from pathlib import Path
 import random
 import numpy as np
@@ -12,6 +13,8 @@ from neurostream.evaluation.cross_session_eval import (
     run_cross_session_sweep,
     run_subject_cross_session,
 )
+from neurostream.data.loader import load_bnci2014_001
+from neurostream.evaluation.artifacts import checkpoint_hash, load_evaluation_artifact
 from neurostream.utils.seed import seed_everything, temp_seed
 
 
@@ -106,6 +109,31 @@ class MockDataset:
         return result
 
 
+class PathAwareMockDataset(MockDataset):
+    def __init__(self):
+        super().__init__()
+        self.received_cache_path = None
+
+    def data_path(self, subject, path=None, **kwargs):
+        return str(path or "default")
+
+    def get_data(self, subjects, cache_config=None):
+        self.received_cache_path = getattr(cache_config, "path", None)
+        return super().get_data(subjects)
+
+
+def test_loader_uses_supported_dataset_and_cache_paths(tmp_path):
+    dataset = PathAwareMockDataset()
+    load_bnci2014_001(
+        subjects=1,
+        dataset=dataset,
+        dataset_path=str(tmp_path / "dataset"),
+        cache_path=str(tmp_path / "cache"),
+    )
+    assert callable(dataset.data_path)
+    assert dataset.received_cache_path == str(tmp_path / "cache")
+
+
 def test_cross_session_sweep_with_mock_dataset(tmp_path):
     """End-to-end integration test of sweep with mock dataset and CSV validation."""
     mock_ds = MockDataset()
@@ -164,6 +192,62 @@ def test_cross_session_sweep_with_mock_dataset(tmp_path):
         assert "consolidation_phases" in rows[0]
 
 
+def test_sweep_manifest_artifacts_and_dashboard_aggregation(tmp_path):
+    """Verify every manifest run is dashboard-loadable and aggregates by subject."""
+    checkpoint_root = tmp_path / "checkpoints"
+    evaluation_root = tmp_path / "evaluations"
+    summary = run_cross_session_sweep(
+        subjects=[1],
+        seeds=[42, 123],
+        epochs=1,
+        batch_size=2,
+        validation_fraction=0.5,
+        dataset=MockDataset(),
+        checkpoint_dir=checkpoint_root,
+        output_evaluation_dir=evaluation_root,
+        encoder_timesteps=10,
+        hidden=16,
+        model_out_features=16,
+    )
+
+    manifest = json.loads(
+        (checkpoint_root / "evaluation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["schema_version"] == 1
+    assert len(manifest["runs"]) == len(summary.runs) == 2
+
+    metric_values = {
+        "target_static_baseline_acc": [],
+        "target_prequential_acc": [],
+        "target_retrospective_acc": [],
+        "source_accuracy_after_adaptation": [],
+    }
+    selected_run = next(run for run in manifest["runs"] if run["seed"] == 123)
+    for run in manifest["runs"]:
+        checkpoint_path = Path(run["checkpoint"])
+        artifact_path = Path(run["evaluation_artifact"])
+        assert checkpoint_path.is_file()
+        assert artifact_path.is_file()
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        artifact = load_evaluation_artifact(
+            artifact_path, checkpoint_path=checkpoint_path, subject=run["subject"]
+        )
+        assert artifact["checkpoint_sha256"] == checkpoint_hash(checkpoint_path)
+        assert artifact["run_config"]["seed"] == run["seed"]
+        assert artifact["subject"] == run["subject"]
+        assert artifact["checkpoint_path"] == str(checkpoint_path)
+        for metric_name in metric_values:
+            metric_values[metric_name].append(float(artifact["metrics"][metric_name]))
+
+    # This mirrors the dashboard's mean +/- population standard deviation view.
+    for values in metric_values.values():
+        assert len(values) == 2
+        assert np.isclose(np.mean(values), np.mean(values))
+        assert np.isclose(np.std(values), np.std(values))
+    assert selected_run["subject"] == 1
+    assert selected_run["seed"] == 123
+
+
 def test_consolidation_ablation_reports_paired_protocol(tmp_path):
     report = run_consolidation_ablation(
         subjects=[1],
@@ -181,7 +265,9 @@ def test_consolidation_ablation_reports_paired_protocol(tmp_path):
         assert "mean_target_static_baseline" in condition
         assert "mean_target_prequential" in condition
         assert "mean_target_retrospective" in condition
+        assert "std_target_static_baseline" in condition
         assert "mean_source_retention" in condition
+        assert "std_target_retrospective" in condition
         assert "std_source_retention" in condition
         assert "settings" in condition
     assert (tmp_path / "ablation" / "report.json").exists()

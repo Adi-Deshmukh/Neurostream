@@ -4,6 +4,8 @@ cache_path: ../data/moabb_cache
 sampling_frequency_hz: 250.0
 epoch_tmin: 2.0
 epoch_tmax: 6.0
+epoch_reference: trial_start
+cue_onset_offset_seconds: 2.0
 filter_l_freq_hz: 4.0
 filter_h_freq_hz: 100.0
 normalization: channelwise_zscore_per_trial

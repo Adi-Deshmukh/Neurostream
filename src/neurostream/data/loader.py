@@ -1,6 +1,7 @@
 """MOABB wrapper for the BNCI 2014-001 motor-imagery dataset."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
@@ -20,6 +21,8 @@ class SessionData:
 	tmax: float = 6.0
 	l_freq: float = 4.0
 	h_freq: float = 100.0
+	epoch_reference: str = "trial_start"
+	trial_counts: dict[str, int] = field(default_factory=dict)
 
 
 def load_bnci2014_001(
@@ -32,6 +35,8 @@ def load_bnci2014_001(
 	l_freq: float = 4.0,
 	h_freq: float = 100.0,
 	dataset_path: str | None = None,
+	cache_path: str | None = None,
+	epoch_reference: str = "trial_start",
 ) -> dict[str, SessionData]:
 	"""Load BNCI2014_001 and return trials grouped by MOABB session.
 
@@ -43,16 +48,29 @@ def load_bnci2014_001(
 	share the same sampling frequency; a :exc:`ValueError` is raised if they
 	differ.
 	"""
+	if dataset_path is not None:
+		import mne
+		Path(dataset_path).mkdir(parents=True, exist_ok=True)
+		mne.set_config("MNE_DATA", str(dataset_path), set_env=True)
 	if dataset is None:
 		from moabb.datasets import BNCI2014_001
 
 		dataset = BNCI2014_001()
-		if dataset_path is not None:
-			setattr(dataset, "data_path", dataset_path)
 
 	subject_ids = [subjects] if isinstance(subjects, int) else list(subjects)
 	requested_sessions = set(sessions) if sessions is not None else None
-	raw_data = dataset.get_data(subjects=subject_ids)
+	cache_config = None
+	if cache_path is not None:
+		from moabb.datasets.base import CacheConfig
+		Path(cache_path).mkdir(parents=True, exist_ok=True)
+		cache_config = CacheConfig(path=str(cache_path), use=True)
+		get_data_params = __import__("inspect").signature(dataset.get_data).parameters
+		if "cache_config" in get_data_params:
+			raw_data = dataset.get_data(subjects=subject_ids, cache_config=cache_config)
+		else:
+			raw_data = dataset.get_data(subjects=subject_ids)
+	else:
+		raw_data = dataset.get_data(subjects=subject_ids)
 	from .preprocessing import preprocess_session
 
 	grouped: dict[str, list[tuple[Any, int, str]]] = {}
@@ -66,6 +84,7 @@ def load_bnci2014_001(
 	result: dict[str, SessionData] = {}
 	for session_name, raw_runs in grouped.items():
 		arrays, labels, metadata = [], [], []
+		trial_counts: dict[str, int] = {}
 		session_sfreq: float | None = None
 		channel_names: tuple[str, ...] | None = None
 		for raw, subject_id, run_name in raw_runs:
@@ -96,6 +115,9 @@ def load_bnci2014_001(
 				{**item, "subject": subject_id, "session": session_name, "run": run_name}
 				for item in run_metadata
 			)
+			for item in run_metadata:
+				label = str(item["event"])
+				trial_counts[label] = trial_counts.get(label, 0) + 1
 		if not arrays:
 			raise ValueError(f"Session '{session_name}' contains no runs")
 		result[session_name] = SessionData(
@@ -108,6 +130,8 @@ def load_bnci2014_001(
 			tmax=tmax,
 			l_freq=l_freq,
 			h_freq=h_freq,
+			epoch_reference=epoch_reference,
+			trial_counts=trial_counts,
 		)
 	return result
 

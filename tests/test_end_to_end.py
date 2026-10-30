@@ -26,6 +26,20 @@ def _make_raw() -> object:
     return raw
 
 
+def test_preprocessing_filters_unexpected_annotations():
+    raw = _make_raw()
+    raw.annotations.append(onset=180.0, duration=0.0, description="boundary")
+    X, y, metadata = preprocess_session(raw, tmin=2.0, tmax=6.0)
+    assert len(X) == len(y) == len(metadata) == 16
+    assert set(item["event"] for item in metadata) == {"769", "770", "771", "772"}
+    assert metadata[0]["class_trial_counts"] == {
+        "769": 4,
+        "770": 4,
+        "771": 4,
+        "772": 4,
+    }
+
+
 def _run_pipeline(checkpoint_dir):
     X, y, metadata = preprocess_session(_make_raw(), tmin=2.0, tmax=6.0)
     train_X, eval_X = X[:8], X[8:]

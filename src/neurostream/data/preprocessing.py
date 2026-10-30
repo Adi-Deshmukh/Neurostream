@@ -5,6 +5,13 @@ from typing import Any
 import numpy as np
 from scipy.signal import butter, sosfiltfilt
 
+MOTOR_IMAGERY_EVENT_ALIASES = {
+	"769": ("769", "left_hand"),
+	"770": ("770", "right_hand"),
+	"771": ("771", "feet"),
+	"772": ("772", "tongue"),
+}
+
 
 def bandpass_filter(
 	data: np.ndarray, sfreq: float, l_freq: float = 4.0, h_freq: float = 100.0
@@ -51,7 +58,12 @@ def preprocess_session(
 	l_freq: float = 4.0,
 	h_freq: float = 100.0,
 ) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]]]:
-	"""Convert one MNE Raw run into normalized EEG trials and metadata."""
+	"""Convert one MNE Raw run into normalized EEG trials and metadata.
+
+	For BNCI2014-001, MOABB's trigger events represent trial start. The
+	experiment presents the class cue two seconds later and ends imagery at
+	 six seconds, so the configured ``[2, 6]`` window is cue-relative ``[0, 4]``.
+	"""
 	import mne
 
 	sfreq = float(raw.info["sfreq"])
@@ -64,12 +76,29 @@ def preprocess_session(
 	events, event_id = mne.events_from_annotations(filtered, verbose=False)
 	if not event_id:
 		raise ValueError("raw run contains no annotated events")
+	selected_events = {
+		canonical: next(
+			(event_id[alias] for alias in aliases if alias in event_id),
+			None,
+		)
+		for canonical, aliases in MOTOR_IMAGERY_EVENT_ALIASES.items()
+	}
+	missing_labels = [label for label, code in selected_events.items() if code is None]
+	if missing_labels:
+		raise ValueError(
+			"raw run is missing expected motor-imagery event labels: "
+			+ ", ".join(missing_labels)
+		)
+	imagery_event_id = {
+		label: int(code) for label, code in selected_events.items()
+		if code is not None
+	}
 
 	epoch_end = tmax - 1.0 / sfreq
 	epochs = mne.Epochs(
 		filtered,
 		events,
-		event_id=event_id,
+		event_id=imagery_event_id,
 		tmin=tmin,
 		tmax=epoch_end,
 		baseline=None,
@@ -83,8 +112,17 @@ def preprocess_session(
 	data -= data.mean(axis=-1, keepdims=True)
 	data = zscore_channels(data)
 	inverse_event_id = {code: label for label, code in epochs.event_id.items()}
+	class_counts = {
+		label: int(np.sum(epochs.events[:, 2] == code))
+		for label, code in epochs.event_id.items()
+	}
 	metadata = [
-		{"event": inverse_event_id[int(code)], "event_code": int(code), "trial": index}
+		{
+			"event": inverse_event_id[int(code)],
+			"event_code": int(code),
+			"trial": index,
+			"class_trial_counts": class_counts,
+		}
 		for index, code in enumerate(epochs.events[:, 2])
 	]
 	return data, epochs.events[:, 2].astype(np.int64), metadata

@@ -248,6 +248,7 @@ engine = load_engine(str(ckpt_file), str(proto_file), subject_id, projection_typ
 @st.cache_data(show_spinner="Simulating streaming trial adaptation...")
 def run_cached_replay(
     _eng: TrialReplayEngine,
+    replay_identity: str,
     mom: float,
     thresh: float,
     cons_on: bool,
@@ -266,6 +267,7 @@ def run_cached_replay(
 
 sim_data = run_cached_replay(
     engine,
+    f"{engine.checkpoint_ref}:subject-{subject_id}:projection-{projection_type}",
     momentum,
     confidence_thresh,
     enable_consolidation,

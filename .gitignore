@@ -10,6 +10,8 @@ venv/
 results/checkpoints/
 results/logs/
 results/figures/
+results/
+
 
 # Local tooling artifacts
 .pytest_cache/

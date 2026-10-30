@@ -17,6 +17,8 @@ class ProjectConfig:
     sampling_frequency_hz: float
     epoch_tmin: float
     epoch_tmax: float
+    epoch_reference: str
+    cue_onset_offset_seconds: float
     filter_l_freq_hz: float
     filter_h_freq_hz: float
     encoder_timesteps: int
@@ -100,6 +102,12 @@ def load_config(path: str | Path = "configs/config.yaml") -> ProjectConfig:
     h_freq = _positive(preprocessing.get("filter_h_freq_hz"), "preprocessing.filter_h_freq_hz")
     if not l_freq < h_freq < sfreq / 2:
         raise ValueError("preprocessing filter cutoffs must satisfy 0 < low < high < Nyquist")
+    epoch_reference = data.get("epoch_reference")
+    if epoch_reference != "trial_start":
+        raise ValueError("data.epoch_reference must be 'trial_start' for BNCI2014_001")
+    cue_offset = _positive(
+        data.get("cue_onset_offset_seconds"), "data.cue_onset_offset_seconds"
+    )
 
     dataset_name = data.get("dataset_name")
     if not isinstance(dataset_name, str) or not dataset_name.strip():
@@ -130,6 +138,8 @@ def load_config(path: str | Path = "configs/config.yaml") -> ProjectConfig:
         sampling_frequency_hz=float(sfreq),
         epoch_tmin=float(tmin),
         epoch_tmax=float(tmax),
+        epoch_reference=epoch_reference,
+        cue_onset_offset_seconds=float(cue_offset),
         filter_l_freq_hz=float(l_freq),
         filter_h_freq_hz=float(h_freq),
         encoder_timesteps=int(_positive(encoder.get("timesteps"), "encoder.timesteps", True)),

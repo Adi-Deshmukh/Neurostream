@@ -50,6 +50,13 @@ and Phase B load that contract and apply it unchanged. Mismatched sampling
 rates or channel contracts are rejected rather than silently using the 250 Hz
 default.
 
+For BNCI2014-001, MOABB's class trigger denotes trial start. The cue appears
+2 seconds after that trigger and imagery ends at 6 seconds, so the default
+epoch window `[2.0, 6.0]` is trial-start-relative and corresponds to `[0.0,
+4.0]` relative to cue onset. The selected reference, cue offset, and window are
+recorded in checkpoint and evaluation provenance; these values must be changed
+together if a different event convention is used.
+
 ---
 
 ## 📖 Component-by-Component Dashboard Guide

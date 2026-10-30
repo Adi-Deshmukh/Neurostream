@@ -5,6 +5,8 @@ data:
   sampling_frequency_hz: 250.0
   epoch_tmin: 2.0
   epoch_tmax: 6.0
+  epoch_reference: trial_start
+  cue_onset_offset_seconds: 2.0
 
 preprocessing:
   filter_l_freq_hz: 4.0

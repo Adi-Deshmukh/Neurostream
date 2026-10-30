@@ -125,11 +125,14 @@ def run_subject_cross_session(
     expected_sampling_frequency_hz: float = 250.0,
     epoch_tmin: float = 2.0,
     epoch_tmax: float = 6.0,
+    epoch_reference: str = "trial_start",
+    cue_onset_offset_seconds: float = 2.0,
     filter_l_freq_hz: float = 4.0,
     filter_h_freq_hz: float = 100.0,
     output_evaluation_dir: str | Path | None = None,
     dataset_name: str = "BNCI2014_001",
     dataset_path: str | Path | None = None,
+    cache_path: str | Path | None = None,
     momentum: float = 0.95,
     confidence_threshold: float = 0.8,
     enable_consolidation: bool = True,
@@ -149,11 +152,13 @@ def run_subject_cross_session(
     sessions = load_bnci2014_001(
         subjects=subject,
         dataset=dataset,
-        dataset_path=dataset_path,
+        dataset_path=str(dataset_path) if dataset_path is not None else None,
+        cache_path=str(cache_path) if cache_path is not None else None,
         tmin=epoch_tmin,
         tmax=epoch_tmax,
         l_freq=filter_l_freq_hz,
         h_freq=filter_h_freq_hz,
+        epoch_reference=epoch_reference,
     )
     train_name = next(name for name in sessions if "train" in name.lower())
     test_name = next(name for name in sessions if "test" in name.lower())
@@ -228,6 +233,8 @@ def run_subject_cross_session(
             "epoch_window_seconds": {
                 "tmin": epoch_tmin,
                 "tmax": epoch_tmax,
+                "reference": epoch_reference,
+                "cue_onset_offset_seconds": cue_onset_offset_seconds,
             },
             "channel_order": list(train_session.channel_names),
             "effective_configuration": {
@@ -244,11 +251,14 @@ def run_subject_cross_session(
                 "model_out_features": model_out_features,
                 "dataset_name": dataset_name,
                 "dataset_path": str(dataset_path) if dataset_path else None,
+                "cache_path": str(cache_path) if cache_path else None,
                 "sampling_frequency_hz": expected_sampling_frequency_hz,
                 "epoch_tmin": epoch_tmin,
                 "epoch_tmax": epoch_tmax,
                 "filter_l_freq_hz": filter_l_freq_hz,
                 "filter_h_freq_hz": filter_h_freq_hz,
+                "epoch_reference": epoch_reference,
+                "cue_onset_offset_seconds": cue_onset_offset_seconds,
             },
         },
     )
@@ -348,11 +358,14 @@ def run_subject_cross_session(
             "model_out_features": model_out_features,
             "dataset_name": dataset_name,
             "dataset_path": str(dataset_path) if dataset_path else None,
+            "cache_path": str(cache_path) if cache_path else None,
             "sampling_frequency_hz": expected_sampling_frequency_hz,
             "epoch_tmin": epoch_tmin,
             "epoch_tmax": epoch_tmax,
             "filter_l_freq_hz": filter_l_freq_hz,
             "filter_h_freq_hz": filter_h_freq_hz,
+            "epoch_reference": epoch_reference,
+            "cue_onset_offset_seconds": cue_onset_offset_seconds,
         },
         run_id=f"subject-{subject}-seed-{seed}",
     )
@@ -376,12 +389,15 @@ def run_cross_session_sweep(
     expected_sampling_frequency_hz: float = 250.0,
     epoch_tmin: float = 2.0,
     epoch_tmax: float = 6.0,
+    epoch_reference: str = "trial_start",
+    cue_onset_offset_seconds: float = 2.0,
     filter_l_freq_hz: float = 4.0,
     filter_h_freq_hz: float = 100.0,
     model_out_features: int = 128,
     output_evaluation_dir: str | Path | None = None,
     dataset_name: str = "BNCI2014_001",
     dataset_path: str | Path | None = None,
+    cache_path: str | Path | None = None,
     momentum: float = 0.95,
     confidence_threshold: float = 0.8,
     enable_consolidation: bool = True,
@@ -414,6 +430,8 @@ def run_cross_session_sweep(
                 expected_sampling_frequency_hz=expected_sampling_frequency_hz,
                 epoch_tmin=epoch_tmin,
                 epoch_tmax=epoch_tmax,
+                epoch_reference=epoch_reference,
+                cue_onset_offset_seconds=cue_onset_offset_seconds,
                 filter_l_freq_hz=filter_l_freq_hz,
                 filter_h_freq_hz=filter_h_freq_hz,
                 model_out_features=model_out_features,
@@ -423,6 +441,7 @@ def run_cross_session_sweep(
                 ),
                 dataset_name=dataset_name,
                 dataset_path=dataset_path,
+                cache_path=cache_path,
                 momentum=momentum,
                 confidence_threshold=confidence_threshold,
                 enable_consolidation=enable_consolidation,
@@ -568,6 +587,12 @@ def run_consolidation_ablation(
             ),
             "std_target_prequential": statistics.pstdev(
                 run["target_prequential_acc"] for run in runs
+            ),
+            "std_target_static_baseline": statistics.pstdev(
+                run["target_static_baseline_acc"] for run in runs
+            ),
+            "std_target_retrospective": statistics.pstdev(
+                run["target_retrospective_acc"] for run in runs
             ),
             "std_source_retention": statistics.pstdev(
                 run["source_accuracy_after_adaptation"] for run in runs
