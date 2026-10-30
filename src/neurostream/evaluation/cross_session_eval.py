@@ -23,6 +23,7 @@ import numpy as np
 import torch
 
 from neurostream.data.loader import load_bnci2014_001
+from neurostream.data.preprocessing import EEGChannelNormalizer, zscore_channels
 from neurostream.data.spike_encoder import apply_encoder, fit_encoder
 from neurostream.evaluation.metrics import (
     EvaluationMetrics,
@@ -31,7 +32,11 @@ from neurostream.evaluation.metrics import (
 )
 from neurostream.evaluation.artifacts import save_evaluation_artifact
 from neurostream.models.snn_feature_extractor import SNNFeatureExtractor
-from neurostream.training.phase_a_train import evaluate_phase_a, train_phase_a
+from neurostream.training.phase_a_train import (
+    _stratified_split,
+    evaluate_phase_a,
+    train_phase_a,
+)
 from neurostream.training.phase_b_adapt import adapt_target_session, score_adaptation
 from neurostream.utils.seed import seed_everything
 
@@ -53,6 +58,8 @@ class SubjectRunResult:
     source_accuracy_before_adaptation: float
     source_accuracy_after_adaptation: float
     source_retention_delta: float
+    source_validation_accuracy_before: float
+    source_validation_accuracy_after: float
     spike_sparsity: float
     accepted_trials: int
     total_target_trials: int
@@ -160,7 +167,7 @@ def run_subject_cross_session(
         l_freq=filter_l_freq_hz,
         h_freq=filter_h_freq_hz,
         epoch_reference=epoch_reference,
-        normalization=normalization,
+        normalization="demean",
     )
     train_name = next(name for name in sessions if "train" in name.lower())
     test_name = next(name for name in sessions if "test" in name.lower())
@@ -178,17 +185,45 @@ def run_subject_cross_session(
             "cross-session evaluation requires matching sampling frequencies; "
             f"got {train_session.sfreq} Hz and {test_session.sfreq} Hz"
         )
+    fit_indices, validation_indices = _stratified_split(
+        torch.as_tensor(train_session.y), validation_fraction, seed
+    )
+    fit_indices_np = fit_indices.cpu().numpy()
+    validation_indices_np = validation_indices.cpu().numpy()
+    x_fit = train_session.X[fit_indices_np]
+    x_validation = train_session.X[validation_indices_np]
+    y_fit = train_session.y[fit_indices_np]
+    y_validation = train_session.y[validation_indices_np]
+    if normalization == "training_fitted_channel_zscore":
+        normalizer = EEGChannelNormalizer().fit(x_fit)
+        x_fit = normalizer.transform(x_fit)
+        x_validation = normalizer.transform(x_validation)
+        x_test = normalizer.transform(test_session.X)
+        normalization_payload = normalizer.payload()
+    elif normalization == "per_trial_zscore":
+        x_fit = zscore_channels(x_fit)
+        x_validation = zscore_channels(x_validation)
+        x_test = zscore_channels(test_session.X)
+        normalization_payload = {"method": "per_trial_channel_zscore"}
+    elif normalization == "demean":
+        x_test = test_session.X
+        normalization_payload = {"method": "per_trial_demean_preserve_channel_scale"}
+    else:
+        raise ValueError(f"unsupported normalization: {normalization}")
     calibration = fit_encoder(
-        train_session.X,
+        x_fit,
         sfreq=train_session.sfreq,
         n_timesteps=encoder_timesteps,
         rate_threshold_pct=encoder_rate_threshold_pct,
     )
     train_spikes = apply_encoder(
-        train_session.X, calibration, sfreq=train_session.sfreq
+        x_fit, calibration, sfreq=train_session.sfreq
+    ).spikes
+    validation_spikes = apply_encoder(
+        x_validation, calibration, sfreq=train_session.sfreq
     ).spikes
     test_spikes = apply_encoder(
-        test_session.X, calibration, sfreq=test_session.sfreq
+        x_test, calibration, sfreq=test_session.sfreq
     ).spikes
 
     # 3. Phase A: Supervised training & freezing
@@ -210,13 +245,15 @@ def run_subject_cross_session(
     }
     phase_a = train_phase_a(
         train_spikes,
-        train_session.y,
+        y_fit,
         subject=subject,
         epochs=epochs,
         batch_size=batch_size,
         seed=seed,
         learning_rate=learning_rate,
         validation_fraction=validation_fraction,
+        validation_spikes=validation_spikes,
+        validation_labels=y_validation,
         augmentation_probability=augmentation_probability,
         model=model,
         checkpoint_dir=save_dir,
@@ -239,7 +276,11 @@ def run_subject_cross_session(
                 "cue_onset_offset_seconds": cue_onset_offset_seconds,
             },
             "channel_order": list(train_session.channel_names),
-            "normalization": train_session.normalization,
+            "normalization": normalization_payload,
+            "split": {
+                "fit_indices": fit_indices_np.tolist(),
+                "validation_indices": validation_indices_np.tolist(),
+            },
             "effective_configuration": {
                 "epochs": epochs,
                 "batch_size": batch_size,
@@ -274,7 +315,7 @@ def run_subject_cross_session(
         phase_a.label_values,
         temperature=0.1,
         train_spikes=train_spikes,
-        train_labels=train_session.y,
+        train_labels=y_fit,
         linear_head_epochs=epochs,
         batch_size=batch_size,
         seed=seed,
@@ -292,7 +333,7 @@ def run_subject_cross_session(
         dtype=torch.long,
     )
     source_labels = torch.as_tensor(
-        [torch.where(label_tensor == int(lbl))[0].item() for lbl in train_session.y],
+        [torch.where(label_tensor == int(lbl))[0].item() for lbl in y_fit],
         dtype=torch.long,
     )
 
@@ -304,13 +345,16 @@ def run_subject_cross_session(
         confidence_threshold=confidence_threshold,
         batch_size=batch_size,
         source_spikes=train_spikes,
+        source_validation_spikes=validation_spikes,
         enable_consolidation=enable_consolidation,
         consolidation_interval=consolidation_interval,
         sleep_steps=sleep_steps,
         noise_std=noise_std,
         pull_rate=pull_rate,
     )
-    phase_b = score_adaptation(phase_b, target_labels, source_labels)
+    phase_b = score_adaptation(
+        phase_b, target_labels, source_labels, y_validation
+    )
 
     gain = phase_b.prequential_accuracy - phase_b.static_baseline_accuracy
 
@@ -326,6 +370,8 @@ def run_subject_cross_session(
         source_accuracy_before_adaptation=phase_b.source_accuracy_before_adaptation,
         source_accuracy_after_adaptation=phase_b.source_accuracy_after_adaptation,
         source_retention_delta=phase_b.source_retention_delta,
+        source_validation_accuracy_before=phase_b.source_validation_accuracy_before,
+        source_validation_accuracy_after=phase_b.source_validation_accuracy_after,
         spike_sparsity=mean_sparsity,
         accepted_trials=phase_b.accepted_trials,
         total_target_trials=test_spikes.shape[-1],

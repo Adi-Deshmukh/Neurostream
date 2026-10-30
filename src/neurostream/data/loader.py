@@ -38,7 +38,7 @@ def load_bnci2014_001(
 	dataset_path: str | None = None,
 	cache_path: str | None = None,
 	epoch_reference: str = "trial_start",
-	normalization: str = "training_fitted_channel_zscore",
+	normalization: str = "demean",
 ) -> dict[str, SessionData]:
 	"""Load BNCI2014_001 and return trials grouped by MOABB session.
 
@@ -136,26 +136,18 @@ def load_bnci2014_001(
 			epoch_reference=epoch_reference,
 			trial_counts=trial_counts,
 		)
-	from .preprocessing import EEGChannelNormalizer
-	train_name = next(
-		(name for name in result if "train" in name.lower()), next(iter(result), None)
-	)
-	if train_name is None:
-		raise ValueError("no sessions were available for normalization")
-	if normalization == "training_fitted_channel_zscore":
-		normalizer = EEGChannelNormalizer().fit(result[train_name].X)
-		for session in result.values():
-			session.X = normalizer.transform(session.X)
-		normalization_payload = normalizer.payload()
-	elif normalization == "per_trial_zscore":
-		normalization_payload = {"method": "per_trial_channel_zscore"}
-	elif normalization == "demean":
-		normalization_payload = {"method": "per_trial_demean_preserve_channel_scale"}
-	else:
+	if normalization not in {"demean", "per_trial_zscore"}:
 		raise ValueError(
-			"normalization must be 'training_fitted_channel_zscore', "
-			"'per_trial_zscore', or 'demean'"
+			"loader normalization must be 'demean' or 'per_trial_zscore'; "
+			"fit training normalization after splitting"
 		)
+	normalization_payload = {
+		"method": (
+			"per_trial_channel_zscore"
+			if normalization == "per_trial_zscore"
+			else "per_trial_demean_preserve_channel_scale"
+		)
+	}
 	for session in result.values():
 		session.normalization = normalization_payload
 	return result

@@ -33,6 +33,10 @@ class PhaseBResult:
 	source_accuracy_before_adaptation: float = float("nan")
 	source_accuracy_after_adaptation: float = float("nan")
 	source_retention_delta: float = float("nan")
+	source_validation_predictions_before: torch.Tensor | None = None
+	source_validation_predictions_after: torch.Tensor | None = None
+	source_validation_accuracy_before: float = float("nan")
+	source_validation_accuracy_after: float = float("nan")
 
 	@property
 	def before_accuracy(self) -> float:
@@ -60,6 +64,7 @@ def adapt_target_session(
 	temperature: float = 0.1,
 	batch_size: int = 32,
 	source_spikes: np.ndarray | torch.Tensor | None = None,
+	source_validation_spikes: np.ndarray | torch.Tensor | None = None,
 	enable_consolidation: bool = False,
 	consolidation_interval: int = 50,
 	sleep_steps: int = 5,
@@ -117,6 +122,8 @@ def adapt_target_session(
 		static_baseline_predictions, _ = memory.predict(features, temperature)
 		source_features = None
 		source_predictions_before = None
+		source_validation_features = None
+		source_validation_predictions_before = None
 		if source_spikes is not None:
 			source_tensor = torch.as_tensor(source_spikes, dtype=torch.float32)
 			if source_tensor.ndim != 3 or source_tensor.shape[:2] != spikes.shape[:2]:
@@ -131,6 +138,18 @@ def adapt_target_session(
 				dim=0,
 			)
 			source_predictions_before, _ = memory.predict(source_features, temperature)
+		if source_validation_spikes is not None:
+			validation_tensor = torch.as_tensor(source_validation_spikes, dtype=torch.float32)
+			if validation_tensor.ndim != 3 or validation_tensor.shape[:2] != spikes.shape[:2]:
+				raise ValueError("source validation and target spikes must have matching dimensions")
+			source_validation_features = torch.cat(
+				[model(validation_tensor[:, :, start:start + batch_size])
+				 for start in range(0, validation_tensor.shape[-1], batch_size)],
+				dim=0,
+			)
+			source_validation_predictions_before, _ = memory.predict(
+				source_validation_features, temperature
+			)
 		prequential_predictions = []
 		accepted_trials = 0
 		consolidation_count = 0
@@ -152,8 +171,13 @@ def adapt_target_session(
 
 		retrospective_predictions, _ = memory.predict(features, temperature)
 	source_predictions_after = None
+	source_validation_predictions_after = None
 	if source_features is not None:
 		source_predictions_after, _ = memory.predict(source_features, temperature)
+	if source_validation_features is not None:
+		source_validation_predictions_after, _ = memory.predict(
+			source_validation_features, temperature
+		)
 
 	drift_val = float("nan")
 	if consolidator is not None:
@@ -175,6 +199,14 @@ def adapt_target_session(
 		source_predictions_after_adaptation=(
 			source_predictions_after.cpu() if source_predictions_after is not None else None
 		),
+		source_validation_predictions_before=(
+			source_validation_predictions_before.cpu()
+			if source_validation_predictions_before is not None else None
+		),
+		source_validation_predictions_after=(
+			source_validation_predictions_after.cpu()
+			if source_validation_predictions_after is not None else None
+		),
 	)
 
 
@@ -182,6 +214,7 @@ def score_adaptation(
 	result: PhaseBResult,
 	target_labels: np.ndarray | torch.Tensor,
 	source_labels: np.ndarray | torch.Tensor | None = None,
+	source_validation_labels: np.ndarray | torch.Tensor | None = None,
 ) -> PhaseBResult:
 	"""Score recorded prequential and retrospective predictions.
 
@@ -223,6 +256,22 @@ def score_adaptation(
 		result.source_retention_delta = (
 			result.source_accuracy_after_adaptation
 			- result.source_accuracy_before_adaptation
+		)
+	if source_validation_labels is not None:
+		validation_y = torch.as_tensor(
+			np.asarray(source_validation_labels).reshape(-1), dtype=torch.long
+		)
+		if (
+			result.source_validation_predictions_before is None
+			or result.source_validation_predictions_after is None
+			or validation_y.numel() != result.source_validation_predictions_before.numel()
+		):
+			raise ValueError("source validation labels must match recorded predictions")
+		result.source_validation_accuracy_before = float(
+			(result.source_validation_predictions_before == validation_y).float().mean()
+		)
+		result.source_validation_accuracy_after = float(
+			(result.source_validation_predictions_after == validation_y).float().mean()
 		)
 	return result
 
