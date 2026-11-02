@@ -670,6 +670,7 @@ with tab_cross_subject:
     st.caption("Metrics are loaded from hash-validated held-out evaluation artifacts; synthetic smoke-test outputs are not benchmark evidence.")
 
     table_data = []
+    heatmap_records: list[dict[str, object]] = []
     for s in range(1, 10):
         subject_manifest_runs = manifest_runs_by_subject.get(s, [])
         if subject_manifest_runs:
@@ -718,6 +719,11 @@ with tab_cross_subject:
             metrics = evaluation_artifact["metrics"]
             for name in metric_values:
                 metric_values[name].append(float(metrics[name]))
+            heatmap_records.append({
+                "Subject": f"S{s:02d}",
+                "Seed": str(run_record.get("seed", "unknown")),
+                **{name: float(metrics[name]) for name in metric_values},
+            })
             checkpoint_data_rows.append(data)
             valid_seeds.append(str(run_record.get("seed")))
         if not checkpoint_data_rows:
@@ -744,6 +750,39 @@ with tab_cross_subject:
 
     df_results = pd.DataFrame(table_data)
     st.dataframe(df_results, width="stretch")
+
+    if heatmap_records:
+        metric_labels = {
+            "target_static_baseline_acc": "Static target baseline",
+            "target_prequential_acc": "Prequential target accuracy",
+            "target_retrospective_acc": "Retrospective diagnostic",
+            "source_accuracy_after_adaptation": "Source retention",
+        }
+        selected_heatmap_metric = st.selectbox(
+            "Heatmap metric", options=list(metric_labels),
+            format_func=lambda key: metric_labels[key],
+            key="benchmark_heatmap_metric",
+        )
+        heatmap_frame = pd.DataFrame(heatmap_records).pivot_table(
+            index="Subject", columns="Seed", values=selected_heatmap_metric,
+            aggfunc="mean",
+        ).sort_index()
+        heatmap_fig = go.Figure(go.Heatmap(
+            z=heatmap_frame.to_numpy() * 100,
+            x=[str(value) for value in heatmap_frame.columns],
+            y=heatmap_frame.index.tolist(), colorscale="Blues",
+            colorbar=dict(title="Accuracy (%)"),
+            hovertemplate="Subject: %{y}<br>Seed: %{x}<br>Score: %{z:.2f}%<extra></extra>",
+        ))
+        heatmap_fig.update_layout(
+            title=f"Subject × seed — {metric_labels[selected_heatmap_metric]}",
+            xaxis_title="Seed", yaxis_title="Subject",
+            height=max(300, 42 * len(heatmap_frame.index) + 100),
+            margin=dict(l=10, r=10, t=55, b=10),
+        )
+        st.plotly_chart(heatmap_fig, width="stretch")
+    else:
+        st.info("No validated subject/seed evaluation artifacts are available for the heatmap.")
 
     chart_c1, chart_c2 = st.columns(2)
 
