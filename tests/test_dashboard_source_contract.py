@@ -64,3 +64,18 @@ def test_chart_width_arguments_remain_compatible_with_streamlit_baseline():
                 and isinstance(keyword.value, ast.Constant)
                 and keyword.value.value == "stretch"
             )
+
+
+def test_all_dashboard_pages_render_without_experiment_artifacts():
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(str(APP_PATH), default_timeout=20).run()
+    assert not app.exception
+    page_names = (
+        "Signal Analysis", "Model Diagnostics", "Adaptation Replay",
+        "Benchmark Lab", "Consolidation Study", "Experiment Registry",
+        "Overview",
+    )
+    for page_name in page_names:
+        app.sidebar.radio[0].set_value(page_name).run()
+        assert not app.exception, f"Dashboard page failed to render: {page_name}"
