@@ -9,6 +9,7 @@ import pytest
 import torch
 
 from neurostream.evaluation.cross_session_eval import (
+    _encode_labels_against,
     run_consolidation_ablation,
     run_cross_session_sweep,
     run_subject_cross_session,
@@ -33,6 +34,13 @@ def test_seed_everything_determinism():
     assert py_1 == py_2
     np.testing.assert_array_equal(np_1, np_2)
     torch.testing.assert_close(th_1, th_2)
+
+
+def test_nonconsecutive_labels_encode_to_model_indices():
+    encoded = _encode_labels_against(
+        np.array([772, 769, 771, 770]), np.array([769, 770, 771, 772])
+    )
+    np.testing.assert_array_equal(encoded.numpy(), [3, 0, 2, 1])
 
 
 def test_temp_seed_context_manager():

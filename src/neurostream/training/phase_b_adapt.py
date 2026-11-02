@@ -37,6 +37,7 @@ class PhaseBResult:
 	source_validation_predictions_after: torch.Tensor | None = None
 	source_validation_accuracy_before: float = float("nan")
 	source_validation_accuracy_after: float = float("nan")
+	confidence_scores: torch.Tensor | None = None
 
 	@property
 	def before_accuracy(self) -> float:
@@ -151,12 +152,14 @@ def adapt_target_session(
 				source_validation_features, temperature
 			)
 		prequential_predictions = []
+		confidence_scores = []
 		accepted_trials = 0
 		consolidation_count = 0
 		for trial_index in range(features.shape[0]):
 			feature = features[trial_index:trial_index + 1]
 			prediction, confidence = memory.predict(feature, temperature)
 			prequential_predictions.append(prediction.item())
+			confidence_scores.append(float(confidence.item()))
 			if confidence.item() > confidence_threshold:
 				memory.update(feature, prediction)
 				accepted_trials += 1
@@ -192,6 +195,7 @@ def adapt_target_session(
 		drift_before_after=drift_val,
 		static_baseline_predictions=static_baseline_predictions.cpu(),
 		prequential_predictions=torch.as_tensor(prequential_predictions, dtype=torch.long),
+		confidence_scores=torch.as_tensor(confidence_scores, dtype=torch.float32),
 		retrospective_predictions=retrospective_predictions.cpu(),
 		source_predictions_before_adaptation=(
 			source_predictions_before.cpu() if source_predictions_before is not None else None

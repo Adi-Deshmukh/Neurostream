@@ -43,6 +43,48 @@ from neurostream.utils.seed import seed_everything
 logger = logging.getLogger(__name__)
 
 
+def _encode_labels_against(
+    labels: np.ndarray | Iterable[int], label_values: np.ndarray
+) -> torch.Tensor:
+    """Map raw dataset labels to the consecutive class indices used by models."""
+    values = np.asarray(list(labels) if not isinstance(labels, np.ndarray) else labels)
+    values = values.reshape(-1)
+    if values.size == 0 or not np.isin(values, label_values).all():
+        raise ValueError("labels contain classes absent from the Phase A mapping")
+    return torch.as_tensor(np.searchsorted(label_values, values), dtype=torch.long)
+
+
+def _phase_b_diagnostics(
+    result: Any, target_labels: torch.Tensor, n_classes: int
+) -> dict[str, Any]:
+    """Return confidence and prequential confusion diagnostics for an artifact."""
+    if result.confidence_scores is None:
+        raise RuntimeError("Phase B did not record target confidence scores")
+    confidence = result.confidence_scores.float()
+    if confidence.numel() == 0:
+        raise RuntimeError("Phase B recorded no target confidence scores")
+    confusion = torch.zeros((n_classes, n_classes), dtype=torch.int64)
+    for actual, predicted in zip(target_labels.tolist(), result.prequential_predictions.tolist()):
+        confusion[int(actual), int(predicted)] += 1
+    thresholds = {
+        str(threshold): int((confidence >= threshold).sum().item())
+        for threshold in (0.50, 0.60, 0.70, 0.80)
+    }
+    return {
+        "confidence_stats": {
+            "min": float(confidence.min()),
+            "max": float(confidence.max()),
+            "mean": float(confidence.mean()),
+            "median": float(confidence.median()),
+            "p25": float(torch.quantile(confidence, 0.25)),
+            "p75": float(torch.quantile(confidence, 0.75)),
+            "p90": float(torch.quantile(confidence, 0.90)),
+        },
+        "confidence_threshold_counts": thresholds,
+        "prequential_confusion_matrix": confusion.tolist(),
+    }
+
+
 @dataclass
 class SubjectRunResult:
     """Full evaluation metrics for one subject and one random seed."""
@@ -327,14 +369,10 @@ def run_subject_cross_session(
 
     # 5. Phase B: Streaming adaptation on target session
     # Map raw labels (e.g. 1, 2, 3, 4) to 0-indexed consecutive class indices
-    label_tensor = torch.as_tensor(phase_a.label_values)
-    target_labels = torch.as_tensor(
-        [torch.where(label_tensor == int(lbl))[0].item() for lbl in test_session.y],
-        dtype=torch.long,
-    )
-    source_labels = torch.as_tensor(
-        [torch.where(label_tensor == int(lbl))[0].item() for lbl in y_fit],
-        dtype=torch.long,
+    target_labels = _encode_labels_against(test_session.y, phase_a.label_values)
+    source_labels = _encode_labels_against(y_fit, phase_a.label_values)
+    validation_labels = _encode_labels_against(
+        y_validation, phase_a.label_values
     )
 
     phase_b = adapt_target_session(
@@ -353,10 +391,22 @@ def run_subject_cross_session(
         pull_rate=pull_rate,
     )
     phase_b = score_adaptation(
-        phase_b, target_labels, source_labels, y_validation
+        phase_b, target_labels, source_labels, validation_labels
     )
+    if not np.isclose(
+        phase_a.validation_accuracy,
+        phase_b.source_validation_accuracy_before,
+        atol=1e-7,
+    ):
+        raise RuntimeError(
+            "Phase A validation accuracy does not match Phase B source "
+            "validation accuracy before adaptation"
+        )
 
     gain = phase_b.prequential_accuracy - phase_b.static_baseline_accuracy
+    diagnostics = _phase_b_diagnostics(
+        phase_b, target_labels, len(phase_a.label_values)
+    )
 
     result = SubjectRunResult(
         subject=subject,
@@ -416,6 +466,8 @@ def run_subject_cross_session(
             "filter_h_freq_hz": filter_h_freq_hz,
             "epoch_reference": epoch_reference,
             "cue_onset_offset_seconds": cue_onset_offset_seconds,
+            "normalization": normalization,
+            **diagnostics,
         },
         run_id=f"subject-{subject}-seed-{seed}",
     )
