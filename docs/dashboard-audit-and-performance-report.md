@@ -67,6 +67,11 @@ system or a causal real-time BCI.
   tensors are not added to the dashboard cache.
 - The app does not use Streamlit's global cache decorators. Session state is
   used for explicit, user-session state; the registry can be refreshed manually.
+- Checkpoint metadata is loaded with PyTorch's restricted `weights_only=True`
+  loader first. Legacy checkpoints that store NumPy calibration arrays require
+  the same explicit `weights_only=False` compatibility fallback used by the
+  existing Phase B runner. Only load checkpoints from trusted local project
+  outputs; a matching SHA-256 proves identity, not publisher trust.
 - The local `projector.joblib` file is deserialized by the existing replay
   artifact loader. Only load prepared caches from trusted local project outputs;
   do not treat an untrusted joblib file as safe input.
