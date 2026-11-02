@@ -627,6 +627,41 @@ with tab_replay:
         )
 
 
+    # Trial-level diagnostics derived from the same prequential replay records.
+    st.markdown('#### Trial-level classification diagnostics')
+    diagnostic_col1, diagnostic_col2 = st.columns(2)
+    replay_truth = np.asarray([step.true_label for step in sim_data.steps[:current_step]], dtype=int)
+    replay_predictions = np.asarray([step.predicted_label for step in sim_data.steps[:current_step]], dtype=int)
+    n_classes = len(sim_data.class_names)
+    confusion = np.zeros((n_classes, n_classes), dtype=int)
+    for truth, prediction in zip(replay_truth, replay_predictions):
+        if 0 <= truth < n_classes and 0 <= prediction < n_classes:
+            confusion[truth, prediction] += 1
+    with diagnostic_col1:
+        confusion_fig = go.Figure(go.Heatmap(
+            z=confusion, x=sim_data.class_names, y=sim_data.class_names,
+            colorscale='Blues', showscale=True,
+            text=confusion, texttemplate='%{text}',
+            hovertemplate='True: %{y}<br>Predicted: %{x}<br>Trials: %{z}<extra></extra>',
+        ))
+        confusion_fig.update_layout(title='Prequential confusion matrix',
+            xaxis_title='Predicted class', yaxis_title='True class',
+            height=390, margin=dict(l=10, r=10, t=55, b=10))
+        st.plotly_chart(confusion_fig, width='stretch')
+    with diagnostic_col2:
+        confidence_fig = go.Figure()
+        for class_index, class_name in enumerate(sim_data.class_names):
+            values = [step.confidence for step in sim_data.steps[:current_step]
+                      if step.true_label == class_index]
+            if values:
+                confidence_fig.add_trace(go.Box(y=values, name=class_name,
+                    boxpoints='outliers', marker_size=4))
+        confidence_fig.add_hline(y=confidence_thresh, line_dash='dash',
+            line_color='#D97706', annotation_text='Acceptance threshold')
+        confidence_fig.update_layout(title='Confidence by true class',
+            yaxis_title='Model confidence', yaxis_range=[0, 1],
+            height=390, margin=dict(l=10, r=10, t=55, b=10))
+        st.plotly_chart(confidence_fig, width='stretch')
 # =============================================================================
 # TAB 2: CROSS-SUBJECT BENCHMARKS (TABLE 5)
 # =============================================================================
