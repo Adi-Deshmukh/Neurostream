@@ -27,7 +27,10 @@ def resolve_artifact_path(root: Path, value: str | Path) -> Path:
 
 
 def load_preprocessing_contract(
-    checkpoint_path: Path, expected_sha256: str | None = None
+    checkpoint_path: Path,
+    expected_sha256: str | None = None,
+    expected_subject: int | None = None,
+    expected_seed: int | None = None,
 ) -> dict[str, Any]:
     """Read checkpoint metadata without constructing a model or loading custom objects."""
     import hashlib
@@ -40,6 +43,10 @@ def load_preprocessing_contract(
     payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     if not isinstance(payload, dict):
         raise ValueError("checkpoint root must be a state dictionary")
+    if expected_subject is not None and int(payload.get("subject", -1)) != expected_subject:
+        raise ValueError("checkpoint subject does not match the selected experiment")
+    if expected_seed is not None and int(payload.get("seed", -1)) != expected_seed:
+        raise ValueError("checkpoint seed does not match the selected experiment")
     contract = payload.get("preprocessing_contract")
     if not isinstance(contract, dict):
         raise ValueError("checkpoint does not contain a preprocessing contract")
