@@ -378,11 +378,12 @@ if requires_replay:
         st.sidebar.caption(f"Replay run ID: `{measurement.run_id}`")
         st.sidebar.caption(f"Measurement time: `{measurement.measured_at_utc}`")
 
-    encoder_metadata = checkpoint_data.get("encoder_calibration", {})
-    encoder_timesteps = encoder_metadata.get("n_timesteps")
-    encoder_channels = encoder_metadata.get("channel_count")
-    if encoder_timesteps is None or encoder_channels is None:
-        st.error("Selected checkpoint lacks encoder timestep/channel metadata.")
+    if active_page == "Measured Spike Activity":
+        encoder_metadata = checkpoint_data.get("encoder_calibration", {})
+        encoder_timesteps = encoder_metadata.get("n_timesteps")
+        encoder_channels = encoder_metadata.get("channel_count")
+        if encoder_timesteps is None or encoder_channels is None:
+            st.error("Selected checkpoint lacks encoder timestep/channel metadata.")
     total_steps = len(sim_data.steps)
 
 def _format_activity(value: float | None) -> str:
