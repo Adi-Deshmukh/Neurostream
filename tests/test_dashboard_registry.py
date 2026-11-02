@@ -103,3 +103,16 @@ def test_discovery_accepts_checkpoint_hash_matched_evaluation(tmp_path):
     assert rows[0]["status"] == "valid"
     assert rows[0]["artifact"]["run_id"] == "fixture-s1-seed42"
     assert rows[0]["metrics"]["target_prequential_acc"] == 0.56
+
+
+def test_registry_lists_checkpoint_without_claiming_evaluation(tmp_path):
+    root = tmp_path
+    checkpoint = root / "scripts" / "results" / "checkpoints" / "phase_a_subject_1.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"phase-a-checkpoint")
+    rows = discover_experiments(root)
+    assert len(rows) == 1
+    assert rows[0]["subject"] == 1
+    assert rows[0]["seed"] is None
+    assert rows[0]["status"] == "checkpoint_without_manifest"
+    assert rows[0]["metrics"] == {}
