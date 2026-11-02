@@ -140,8 +140,7 @@ if page == "Overview":
     header("Experiment overview", "Validated cross-session results. Every displayed metric is sourced from a checkpoint-matched evaluation artifact.")
     if not valid:
         st.warning("No validated experiment runs were found. Generate evaluation artifacts first; the dashboard will not invent placeholder metrics.")
-        st.code("python -m neurostream.evaluation.cross_session_eval", language="bash")
-        st.info("Expected registry: results/checkpoints/**/evaluation_manifest.json with matching checkpoint and evaluation JSON files.")
+        st.info("Run the repository's existing cross-session evaluation sweep to generate results/checkpoints/**/evaluation_manifest.json and matching evaluation JSON files.")
     else:
         run = run or valid[0]
         m = run["metrics"]
@@ -174,10 +173,14 @@ elif page == "Signal Analysis":
     header("EEG signal analysis", "Inspect preprocessed BNCI2014-001 epochs. Dataset loading is explicit and may require a first-time MOABB download.")
     subject = st.selectbox("Subject", list(range(1, 10)), format_func=lambda s: f"S{s:02d}")
     if st.button("Load EEG sessions", type="primary"):
-        with st.spinner("Loading the selected subject's EEG sessions..."):
-            from neurostream.data.loader import load_bnci2014_001
-            st.session_state["ns_signal_sessions"] = load_bnci2014_001(subjects=subject)
-            st.session_state["ns_signal_subject"] = subject
+        try:
+            with st.spinner("Loading the selected subject's EEG sessions..."):
+                from neurostream.data.loader import load_bnci2014_001
+                st.session_state["ns_signal_sessions"] = load_bnci2014_001(subjects=subject)
+                st.session_state["ns_signal_subject"] = subject
+        except Exception as error:
+            st.error("EEG session loading failed. Check the MOABB dataset cache, network access and preprocessing dependencies.")
+            st.exception(error)
     sessions = st.session_state.get("ns_signal_sessions")
     if sessions is None or st.session_state.get("ns_signal_subject") != subject:
         st.info("EEG is not loaded. Select a subject and click Load EEG sessions. This operation is separate from dashboard navigation.")
@@ -281,7 +284,13 @@ elif page == "Model Diagnostics":
         else:
             st.info("Per-layer activity is not present in this evaluation artifact. No per-neuron or layer-level values are inferred.")
         st.markdown("#### Architecture")
-        st.code("Input spike tensor → FC-256 → LIF1 → FC-128 → LIF2 → mean spike-rate feature (128-D)", language="text")
+        hidden_width = int(config.get("model_hidden", 256))
+        feature_width = int(config.get("model_out_features", 128))
+        st.code(
+            f"Input spike tensor → FC-{hidden_width} → LIF1 → "
+            f"FC-{feature_width} → LIF2 → mean spike-rate feature ({feature_width}-D)",
+            language="text",
+        )
         st.caption("Architecture is read from the project model definition. Spike activity is not hardware power or energy consumption.")
         cache_root = ROOT / "results" / "dashboard_cache"
         matching_metadata = []
@@ -317,15 +326,19 @@ elif page == "Model Diagnostics":
                 f"measurement {measured.get('measured_at_utc', 'N/A')}"
             )
             if st.button("Load feature-space distribution"):
-                with np.load(metadata_path.parent / "features.npz", allow_pickle=False) as arrays:
-                    s1_xy = arrays["session1_features_2d"].copy()
-                    s2_xy = arrays["session2_features_2d"].copy()
-                    s1_y = arrays["session1_labels"].copy()
-                    s2_y = arrays["session2_labels"].copy()
-                st.session_state["ns_feature_view"] = {
-                    "identity": artifact["checkpoint_sha256"],
-                    "s1_xy": s1_xy, "s2_xy": s2_xy, "s1_y": s1_y, "s2_y": s2_y,
-                }
+                try:
+                    with np.load(metadata_path.parent / "features.npz", allow_pickle=False) as arrays:
+                        s1_xy = arrays["session1_features_2d"].copy()
+                        s2_xy = arrays["session2_features_2d"].copy()
+                        s1_y = arrays["session1_labels"].copy()
+                        s2_y = arrays["session2_labels"].copy()
+                    st.session_state["ns_feature_view"] = {
+                        "identity": artifact["checkpoint_sha256"],
+                        "s1_xy": s1_xy, "s2_xy": s2_xy, "s1_y": s1_y, "s2_y": s2_y,
+                    }
+                except Exception as error:
+                    st.error("Prepared feature arrays could not be loaded or validated.")
+                    st.exception(error)
             feature_view = st.session_state.get("ns_feature_view")
             if feature_view and feature_view.get("identity") == artifact["checkpoint_sha256"]:
                 feature_fig = go.Figure()
@@ -390,12 +403,16 @@ elif page == "Adaptation Replay":
                 st.session_state.pop("ns_replay", None)
                 st.session_state["ns_engine_identity"] = identity
             if st.button("Load prepared features", type="primary"):
-                from neurostream.dashboard.simulation import TrialReplayEngine
-                st.session_state["ns_engine"] = TrialReplayEngine.from_prepared_artifact(
-                    cache_dir, checkpoint_ref=run["artifact"]["checkpoint_sha256"],
-                    subject=subject, prototypes_ref=prototype_hash,
-                )
-                st.session_state.pop("ns_replay", None)
+                try:
+                    from neurostream.dashboard.simulation import TrialReplayEngine
+                    st.session_state["ns_engine"] = TrialReplayEngine.from_prepared_artifact(
+                        cache_dir, checkpoint_ref=run["artifact"]["checkpoint_sha256"],
+                        subject=subject, prototypes_ref=prototype_hash,
+                    )
+                    st.session_state.pop("ns_replay", None)
+                except Exception as error:
+                    st.error("Prepared replay cache was rejected. Re-run the preparation command shown above.")
+                    st.exception(error)
             engine = st.session_state.get("ns_engine")
             if engine is not None:
                 with st.form("ns_replay_settings"):
@@ -408,12 +425,16 @@ elif page == "Adaptation Replay":
                     execute = st.form_submit_button("Run offline replay")
                 config_id = (momentum, threshold, consolidation, int(interval), int(sleep_steps), pull_rate)
                 if execute:
-                    st.session_state["ns_replay"] = engine.run_replay(
-                        momentum=momentum, confidence_threshold=threshold,
-                        enable_consolidation=consolidation, consolidation_interval=int(interval),
-                        sleep_steps=int(sleep_steps), pull_rate=pull_rate,
-                    )
-                    st.session_state["ns_replay_config"] = config_id
+                    try:
+                        st.session_state["ns_replay"] = engine.run_replay(
+                            momentum=momentum, confidence_threshold=threshold,
+                            enable_consolidation=consolidation, consolidation_interval=int(interval),
+                            sleep_steps=int(sleep_steps), pull_rate=pull_rate,
+                        )
+                        st.session_state["ns_replay_config"] = config_id
+                    except Exception as error:
+                        st.error("Offline replay failed for this configuration. The other dashboard pages remain available.")
+                        st.exception(error)
                 replay = st.session_state.get("ns_replay")
                 if replay is not None:
                     total = len(replay.steps)
