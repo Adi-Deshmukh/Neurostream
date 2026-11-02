@@ -128,7 +128,7 @@ valid = valid_runs(registry)
 st.sidebar.markdown("## NeuroStream")
 st.sidebar.caption("Adaptive spiking BCI · BNCI2014-001")
 page = st.sidebar.radio("Workspace", PAGES, index=0, key="ns_page")
-st.sidebar.divider()
+st.sidebar.markdown('---')
 st.sidebar.caption(f"{len(valid)} validated runs · {len(registry) - len(valid)} unavailable or rejected")
 if st.sidebar.button("Refresh artifact registry", use_container_width=True):
     st.session_state.ns_registry = discover_experiments(ROOT)
@@ -189,8 +189,13 @@ elif page == "Signal Analysis":
         channel_names = list(data.channel_names) or [f"Channel {i+1}" for i in range(data.X.shape[1])]
         channel = st.selectbox("Channel", range(data.X.shape[1]), format_func=lambda i: channel_names[i])
         start_s = st.number_input("Window start (s)", min_value=0.0, max_value=max(0.0, (data.X.shape[-1]-2)/data.sfreq), value=0.0, step=0.25)
-        end_default = min(data.X.shape[-1] / data.sfreq, 4.0)
-        end_s = st.number_input("Window end (s)", min_value=max(0.01, start_s+0.01), max_value=data.X.shape[-1]/data.sfreq, value=max(start_s+0.01, end_default), step=0.25)
+        max_time = data.X.shape[-1] / data.sfreq
+        end_min = min(max_time, start_s + 0.01)
+        end_default = min(max_time, max(start_s + 0.01, 4.0))
+        end_s = st.number_input(
+            "Window end (s)", min_value=end_min, max_value=max_time,
+            value=end_default, step=0.25,
+        )
         a, b = int(start_s*data.sfreq), min(data.X.shape[-1], int(end_s*data.sfreq))
         time = np.arange(a, b) / data.sfreq
         signal = data.X[trial, channel, a:b]
@@ -236,6 +241,73 @@ elif page == "Model Diagnostics":
         st.markdown("#### Architecture")
         st.code("Input spike tensor → FC-256 → LIF1 → FC-128 → LIF2 → mean spike-rate feature (128-D)", language="text")
         st.caption("Architecture is read from the project model definition. Spike activity is not hardware power or energy consumption.")
+        cache_root = ROOT / "results" / "dashboard_cache"
+        matching_metadata = []
+        if cache_root.exists():
+            for metadata_path in cache_root.glob("*/metadata.json"):
+                try:
+                    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                    if (
+                        metadata.get("checkpoint_ref") == artifact.get("checkpoint_sha256")
+                        and int(metadata.get("subject", -1)) == int(run["subject"])
+                    ):
+                        matching_metadata.append((metadata_path, metadata))
+                except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                    continue
+        if matching_metadata:
+            metadata_path, metadata = matching_metadata[0]
+            measured = metadata.get("measurement", {})
+            layer_rates = measured.get("layer_activity_fraction", {})
+            if layer_rates:
+                layer_fig = go.Figure(go.Bar(
+                    x=list(layer_rates), y=list(layer_rates.values()),
+                    marker_color="#269B83",
+                ))
+                layer_fig.update_layout(
+                    title="Measured LIF layer activity",
+                    yaxis_title="Fraction of spike opportunities",
+                    yaxis_range=[0, 1], height=340,
+                )
+                st.plotly_chart(layer_fig, use_container_width=True)
+            st.caption(
+                f"Prepared replay provenance: {metadata.get('run_id')} · "
+                f"projection {metadata.get('projection_method')} · "
+                f"measurement {measured.get('measured_at_utc', 'N/A')}"
+            )
+            if st.button("Load feature-space distribution"):
+                with np.load(metadata_path.parent / "features.npz", allow_pickle=False) as arrays:
+                    s1_xy = arrays["session1_features_2d"].copy()
+                    s2_xy = arrays["session2_features_2d"].copy()
+                    s1_y = arrays["session1_labels"].copy()
+                    s2_y = arrays["session2_labels"].copy()
+                st.session_state["ns_feature_view"] = {
+                    "identity": artifact["checkpoint_sha256"],
+                    "s1_xy": s1_xy, "s2_xy": s2_xy, "s1_y": s1_y, "s2_y": s2_y,
+                }
+            feature_view = st.session_state.get("ns_feature_view")
+            if feature_view and feature_view.get("identity") == artifact["checkpoint_sha256"]:
+                feature_fig = go.Figure()
+                names = artifact.get("label_names", [])
+                for class_index, class_name in enumerate(names):
+                    for coords, labels, session_label, opacity in (
+                        (feature_view["s1_xy"], feature_view["s1_y"], "Session 1", .25),
+                        (feature_view["s2_xy"], feature_view["s2_y"], "Session 2", .75),
+                    ):
+                        mask = labels == class_index
+                        if np.any(mask):
+                            feature_fig.add_trace(go.Scatter(
+                                x=coords[mask, 0], y=coords[mask, 1], mode="markers",
+                                marker=dict(size=5, opacity=opacity, color=CLASS_COLORS[class_index % 4]),
+                                name=f"{session_label} · {class_name}",
+                            ))
+                feature_fig.update_layout(
+                    title="Fixed reference feature-space distribution",
+                    xaxis_title="Projection dimension 1", yaxis_title="Projection dimension 2",
+                    height=520,
+                )
+                st.plotly_chart(feature_fig, use_container_width=True)
+        else:
+            st.info("No prepared replay metadata matches this checkpoint. Per-layer activity and feature-space views are unavailable until the matching cache is prepared.")
         confusion = config.get("prequential_confusion_matrix")
         labels = artifact.get("label_names", [])
         if confusion is not None and labels:
@@ -258,7 +330,11 @@ elif page == "Adaptation Replay":
         cache_file = cache_dir / "metadata.json"
         if not cache_file.is_file():
             st.warning(f"Prepared replay cache not found: {cache_dir}")
-            st.code(f"python scripts/precompute_dashboard_artifacts.py --subject {subject} --projection {projection}", language="bash")
+            st.code(
+                f'python scripts/precompute_dashboard_artifacts.py --subject {subject} '
+                f'--checkpoint "{checkpoint}" --prototypes "{prototype}" --projection {projection}',
+                language="bash",
+            )
         elif not prototype.is_file():
             st.warning(f"Prototype file not found next to selected checkpoint: {prototype}")
         else:
@@ -457,8 +533,3 @@ elif page == "Experiment Registry":
         if cache_entries:
             st.dataframe(pd.DataFrame([{"Cache":str(p.parent.relative_to(ROOT)),"Metadata bytes":p.stat().st_size} for p in cache_entries]),use_container_width=True,hide_index=True)
 
-elif page == "Model Diagnostics":
-    pass
-
-elif page == "Adaptation Replay":
-    pass
