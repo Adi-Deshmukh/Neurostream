@@ -264,7 +264,7 @@ def load_engine(c_path: str, p_path: str, s_id: int, proj: str) -> TrialReplayEn
                 checkpoint_ref=checkpoint_ref,
                 subject=s_id,
             )
-        except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
+        except (OSError, ValueError, KeyError, ImportError, EOFError, json.JSONDecodeError) as error:
             st.warning(
                 f"Prepared replay cache was rejected ({error}). "
                 "Rebuilding from the source checkpoint and dataset."
@@ -389,9 +389,6 @@ if requires_replay:
 def _format_activity(value: float | None) -> str:
     if value is None or not np.isfinite(value):
         return "N/A"
-    return f"{value:.2%}"
-
-total_steps = len(sim_data.steps)
 
 # Views are selected with a sidebar navigator so inactive pages are not computed.
 
