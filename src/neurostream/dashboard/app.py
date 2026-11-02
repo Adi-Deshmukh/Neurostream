@@ -463,7 +463,7 @@ with tab_replay:
 
         # 4. Trajectory Trails of Adapting Prototypes
         for c_idx in range(len(sim_data.class_names)):
-            traj = np.array([sim_data.steps[i].prototypes_2d[c_idx] for i in range(current_step)])
+            traj = sim_data.prototype_history_2d[:current_step, c_idx, :]
             fig_manifold.add_trace(
                 go.Scatter(
                     x=traj[:, 0],
