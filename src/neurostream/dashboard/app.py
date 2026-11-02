@@ -380,17 +380,20 @@ elif page == "Adaptation Replay":
         elif not prototype.is_file():
             st.warning(f"Prototype file not found next to selected checkpoint: {prototype}")
         else:
-            identity = hashlib.sha256(f"{run['artifact']['checkpoint_sha256']}:{projection}:{cache_file.stat().st_mtime_ns}".encode()).hexdigest()
+            prototype_hash = hashlib.sha256(prototype.read_bytes()).hexdigest()
+            identity = hashlib.sha256(
+                f"{run['artifact']['checkpoint_sha256']}:{prototype_hash}:"
+                f"{projection}:{cache_file.stat().st_mtime_ns}".encode()
+            ).hexdigest()
             if st.session_state.get("ns_engine_identity") != identity:
                 st.session_state.pop("ns_engine", None)
                 st.session_state.pop("ns_replay", None)
                 st.session_state["ns_engine_identity"] = identity
             if st.button("Load prepared features", type="primary"):
                 from neurostream.dashboard.simulation import TrialReplayEngine
-                proto_hash = hashlib.sha256(prototype.read_bytes()).hexdigest()
                 st.session_state["ns_engine"] = TrialReplayEngine.from_prepared_artifact(
                     cache_dir, checkpoint_ref=run["artifact"]["checkpoint_sha256"],
-                    subject=subject, prototypes_ref=proto_hash,
+                    subject=subject, prototypes_ref=prototype_hash,
                 )
                 st.session_state.pop("ns_replay", None)
             engine = st.session_state.get("ns_engine")
@@ -458,6 +461,33 @@ elif page == "Adaptation Replay":
                             st.plotly_chart(fig,use_container_width=True)
                             st.metric("Session 1 train retention", pct(replay.session1_retention_accuracy))
                             st.metric("Adaptation gain", pct(replay.adaptation_gain))
+                        accepted_count = sum(1 for item in replay.steps[:current] if item.accepted)
+                        consolidation_count = sum(1 for item in replay.steps[:current] if item.sleep_consolidation_triggered)
+                        accepted_col, rejected_col, consolidation_col = st.columns(3)
+                        accepted_col.metric("Accepted updates", str(accepted_count))
+                        rejected_col.metric("Rejected trials", str(current - accepted_count))
+                        consolidation_col.metric("Consolidation triggers", str(consolidation_count))
+                        drift_fig = go.Figure()
+                        drift_fig.add_trace(go.Scatter(
+                            x=np.arange(1, current + 1),
+                            y=[item.drift_loss for item in replay.steps[:current]],
+                            mode="lines", name="Recorded drift loss",
+                        ))
+                        drift_fig.update_layout(
+                            title="Recorded consolidation drift diagnostic",
+                            xaxis_title="Trial", yaxis_title="Drift loss (recorded at trigger)",
+                            height=300,
+                        )
+                        st.plotly_chart(drift_fig, use_container_width=True)
+                        displacement = np.linalg.norm(
+                            step.prototypes_2d - replay.initial_prototypes_2d, axis=1
+                        )
+                        st.markdown("#### Per-class prototype movement")
+                        st.dataframe(pd.DataFrame({
+                            "Class": replay.class_names,
+                            "2D projected displacement": displacement,
+                        }), use_container_width=True, hide_index=True)
+                        st.caption("Displacement is measured in the fixed 2D projection coordinates. High-dimensional per-trial prototype history is not stored by this replay schema.")
                         decisions = pd.DataFrame([{"Trial":x.step,"True":replay.class_names[x.true_label],"Predicted":replay.class_names[x.predicted_label],"Confidence":x.confidence,"Accepted":x.accepted,"Consolidation":x.sleep_consolidation_triggered,"Drift":x.drift_loss} for x in replay.steps])
                         st.dataframe(decisions.iloc[max(0,current-20):current],use_container_width=True,hide_index=True)
 
@@ -483,19 +513,34 @@ elif page == "Benchmark Lab":
             means = filtered.groupby("Subject")[metric].mean()
             stds = filtered.groupby("Subject")[metric].std()
             summary = pd.DataFrame({"Mean":means,"Seed SD":stds})
+            st.markdown("#### Subject-wise variability")
             st.dataframe(summary,use_container_width=True)
+            seed_summary = filtered.groupby("Seed")[metric].agg(["mean", "std", "count"])
+            st.markdown("#### Seed-wise variability")
+            st.dataframe(seed_summary, use_container_width=True)
             fig2 = go.Figure()
             for col,color in zip(("Static target","Prequential target","Retrospective target"),CLASS_COLORS[:3]):
                 grp=filtered.groupby("Subject")[col].mean()
                 fig2.add_trace(go.Bar(x=grp.index,y=grp.values,name=col,marker_color=color))
             fig2.update_layout(title="Static, prequential and retrospective comparison",barmode="group",yaxis_title="Accuracy",yaxis_range=[0,1],height=390)
             st.plotly_chart(fig2,use_container_width=True)
-            selected = valid[0]
-            cm = selected["run_config"].get("prequential_confusion_matrix")
-            labels = selected["label_names"]
-            if cm is not None and labels:
-                fig_cm=confusion_figure(cm,labels,"Stored prequential confusion matrix")
-                if fig_cm: st.plotly_chart(fig_cm,use_container_width=True)
+            eligible = [
+                item for item in valid
+                if item["subject"] in chosen_subjects and item["seed"] in chosen_seeds
+            ]
+            if eligible:
+                cm_run = st.selectbox(
+                    "Confusion matrix run", eligible,
+                    format_func=lambda item: f"S{item['subject']:02d} · seed {item['seed']}",
+                )
+                cm = cm_run["run_config"].get("prequential_confusion_matrix")
+                labels = cm_run["label_names"]
+                if cm is not None and labels:
+                    fig_cm = confusion_figure(cm, labels, "Stored prequential confusion matrix")
+                    if fig_cm:
+                        st.plotly_chart(fig_cm, use_container_width=True)
+                else:
+                    st.info("The selected evaluation artifact does not contain a confusion matrix.")
         st.dataframe(filtered,use_container_width=True,hide_index=True)
 
 elif page == "Consolidation Study":
