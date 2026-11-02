@@ -1143,6 +1143,194 @@ if active_page == "Measured Spike Activity":
 
 
 # =============================================================================
+# MODEL DIAGNOSTICS
+# =============================================================================
+if active_page == "Model Diagnostics":
+    st.markdown("### Model Diagnostics")
+    st.caption(
+        "Diagnostics use the frozen SNN feature extractor and initial prototype "
+        "memory. Classification results here are static, pre-adaptation Session 2 "
+        "diagnostics—not online replay results."
+    )
+
+    s1_features = np.asarray(engine.s1_features, dtype=np.float64)
+    s2_features = np.asarray(engine.s2_features, dtype=np.float64)
+    s1_labels = np.asarray(engine.s1_labels, dtype=int)
+    s2_labels = np.asarray(engine.s2_labels, dtype=int)
+    static_predictions = np.asarray(engine.static_preds, dtype=int)
+    prototypes = engine.initial_prototypes.detach().cpu().numpy().astype(np.float64)
+    class_names = list(engine.class_names)
+    n_classes = len(class_names)
+
+    if (
+        s1_features.ndim != 2 or s2_features.ndim != 2
+        or s1_features.shape[1] != s2_features.shape[1]
+        or s2_labels.size != s2_features.shape[0]
+        or static_predictions.size != s2_labels.size
+        or prototypes.shape != (n_classes, s2_features.shape[1])
+    ):
+        st.error("Feature, label, prediction, and prototype dimensions are inconsistent.")
+        st.stop()
+
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Feature dimensions", f"{s2_features.shape[1]:,}")
+    metric_cols[1].metric("Session 1 trials", f"{s1_features.shape[0]:,}")
+    metric_cols[2].metric("Session 2 trials", f"{s2_features.shape[0]:,}")
+    metric_cols[3].metric("Classes", str(n_classes))
+
+    st.markdown("#### Static Session 2 classification")
+    valid_mask = (
+        (s2_labels >= 0) & (s2_labels < n_classes)
+        & (static_predictions >= 0) & (static_predictions < n_classes)
+    )
+    if not np.any(valid_mask):
+        st.warning("No valid Session 2 labels and predictions are available.")
+    else:
+        confusion = np.zeros((n_classes, n_classes), dtype=int)
+        for truth, prediction in zip(
+            s2_labels[valid_mask], static_predictions[valid_mask]
+        ):
+            confusion[truth, prediction] += 1
+        class_counts = confusion.sum(axis=1)
+        class_accuracy = np.divide(
+            np.diag(confusion), class_counts,
+            out=np.full(n_classes, np.nan, dtype=float),
+            where=class_counts > 0,
+        )
+        overall_accuracy = float(np.mean(
+            s2_labels[valid_mask] == static_predictions[valid_mask]
+        ))
+        st.metric(
+            "Static pre-adaptation accuracy",
+            f"{overall_accuracy:.2%}",
+            help="Computed from the engine's frozen SNN and initial prototypes on Session 2 features.",
+        )
+        diagnostic_cols = st.columns([1.3, 1.0])
+        with diagnostic_cols[0]:
+            confusion_fig = go.Figure(go.Heatmap(
+                z=confusion,
+                x=class_names,
+                y=class_names,
+                text=confusion,
+                texttemplate="%{text}",
+                colorscale="Blues",
+                hovertemplate="True: %{y}<br>Predicted: %{x}<br>Trials: %{z}<extra></extra>",
+            ))
+            confusion_fig.update_layout(
+                title="Static Session 2 confusion matrix",
+                xaxis_title="Predicted class",
+                yaxis_title="True class",
+                height=420,
+                margin=dict(l=10, r=10, t=55, b=10),
+            )
+            st.plotly_chart(confusion_fig, width="stretch")
+        with diagnostic_cols[1]:
+            accuracy_fig = go.Figure(go.Bar(
+                x=class_names,
+                y=np.nan_to_num(class_accuracy, nan=0.0) * 100,
+                text=[
+                    f"{value:.1%}" if np.isfinite(value) else "No trials"
+                    for value in class_accuracy
+                ],
+                textposition="outside",
+            ))
+            accuracy_fig.update_layout(
+                title="Per-class static accuracy",
+                yaxis_title="Accuracy (%)",
+                yaxis=dict(range=[0, 110]),
+                height=420,
+                margin=dict(l=10, r=10, t=55, b=10),
+            )
+            st.plotly_chart(accuracy_fig, width="stretch")
+
+    st.markdown("#### Prototype geometry")
+    prototype_norms = np.linalg.norm(prototypes, axis=1, keepdims=True)
+    normalized_prototypes = prototypes / np.maximum(prototype_norms, 1e-12)
+    similarity = normalized_prototypes @ normalized_prototypes.T
+    similarity_fig = go.Figure(go.Heatmap(
+        z=similarity,
+        x=class_names,
+        y=class_names,
+        zmin=-1,
+        zmax=1,
+        colorscale="RdBu",
+        colorbar=dict(title="Cosine similarity"),
+        hovertemplate="%{y} vs %{x}<br>Cosine similarity: %{z:.3f}<extra></extra>",
+    ))
+    similarity_fig.update_layout(
+        title="Initial prototype cosine-similarity matrix",
+        xaxis_title="Class",
+        yaxis_title="Class",
+        height=430,
+        margin=dict(l=10, r=10, t=55, b=10),
+    )
+    st.plotly_chart(similarity_fig, width="stretch")
+
+    centroid_fig = go.Figure()
+    for session_name, features, labels in (
+        ("Session 1", s1_features, s1_labels),
+        ("Session 2", s2_features, s2_labels),
+    ):
+        similarities = []
+        for class_index in range(n_classes):
+            class_features = features[labels == class_index]
+            if class_features.size == 0:
+                similarities.append(np.nan)
+                continue
+            centroid = class_features.mean(axis=0)
+            denominator = (
+                np.linalg.norm(centroid) * np.linalg.norm(prototypes[class_index])
+            )
+            similarities.append(
+                float(np.dot(centroid, prototypes[class_index]) / denominator)
+                if denominator > 1e-12 else np.nan
+            )
+        centroid_fig.add_trace(go.Bar(
+            x=class_names,
+            y=similarities,
+            name=session_name,
+        ))
+    centroid_fig.update_layout(
+        title="Session feature-centroid alignment with initial prototypes",
+        xaxis_title="Class",
+        yaxis_title="Cosine similarity",
+        yaxis=dict(range=[-1, 1]),
+        barmode="group",
+        height=390,
+        margin=dict(l=10, r=10, t=55, b=10),
+    )
+    st.plotly_chart(centroid_fig, width="stretch")
+
+    st.markdown("#### Feature-norm distributions")
+    norm_fig = go.Figure()
+    for session_name, features, labels in (
+        ("Session 1", s1_features, s1_labels),
+        ("Session 2", s2_features, s2_labels),
+    ):
+        feature_norms = np.linalg.norm(features, axis=1)
+        for class_index, class_name in enumerate(class_names):
+            values = feature_norms[labels == class_index]
+            if values.size:
+                norm_fig.add_trace(go.Box(
+                    y=values,
+                    name=f"{session_name} · {class_name}",
+                    boxpoints=False,
+                ))
+    norm_fig.update_layout(
+        title="Frozen SNN feature norms by session and class",
+        yaxis_title="L2 feature norm",
+        height=430,
+        margin=dict(l=10, r=10, t=55, b=10),
+    )
+    st.plotly_chart(norm_fig, width="stretch")
+    st.caption(
+        "Feature-centroid alignment and feature norms are descriptive diagnostics. "
+        "They do not establish statistical significance or generalization. "
+        "Use multiple subjects and seeds for inferential comparisons."
+    )
+
+
+# =============================================================================
 # EEG SIGNAL ANALYSIS
 # =============================================================================
 if active_page == "EEG Signal Analysis":
