@@ -16,6 +16,23 @@ import torch
 from neurostream.dashboard.simulation import ReplaySimulationData, TrialReplayEngine
 from neurostream.evaluation.artifacts import load_evaluation_artifact
 
+# Resolve paths independently of the process working directory.
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+CHECKPOINT_DIR = next(
+    (path.resolve() for path in (
+        PROJECT_ROOT / 'results' / 'checkpoints',
+        PROJECT_ROOT / 'scripts' / 'results' / 'checkpoints',
+    ) if path.is_dir()),
+    (PROJECT_ROOT / 'results' / 'checkpoints').resolve(),
+)
+
+def resolve_repo_path(value: str | Path) -> Path:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path
+    candidates = (PROJECT_ROOT / path, PROJECT_ROOT / 'scripts' / path)
+    return next((candidate.resolve() for candidate in candidates if candidate.exists()), candidates[0].resolve())
+
 # ── Page Configuration & Enterprise Styling ────────────────────────────────────
 
 st.set_page_config(
@@ -153,7 +170,7 @@ subject_id = st.sidebar.selectbox(
     help="Select any of the 9 benchmark subjects. Loads real Phase A SNN weights and prototypes.",
 )
 
-manifest_path = Path(__file__).resolve().parents[3] / "scripts" / "results" / "checkpoints" / "evaluation_manifest.json"
+manifest_path = CHECKPOINT_DIR / "evaluation_manifest.json""
 selected_run = None
 manifest_runs_by_subject: dict[int, list[dict[str, object]]] = {}
 if manifest_path.exists():
@@ -180,12 +197,12 @@ if manifest_path.exists():
         st.sidebar.error(f"Evaluation manifest rejected: {error}")
 
 if selected_run is not None:
-    ckpt_file = Path(selected_run["checkpoint"])
-    artifact_file = Path(selected_run["evaluation_artifact"])
+    ckpt_file = resolve_repo_path(selected_run["checkpoint"])
+    artifact_file = resolve_repo_path(selected_run["evaluation_artifact"])
     proto_file = ckpt_file.with_name(f"prototypes_subject_{subject_id}.pt")
 else:
-    ckpt_file = Path(__file__).resolve().parents[3] / "scripts" / "results" / "checkpoints" / f"phase_a_subject_{subject_id}.pt"
-    proto_file = Path(__file__).resolve().parents[3] / "scripts" / "results" / "checkpoints" / f"prototypes_subject_{subject_id}.pt"
+    ckpt_file = CHECKPOINT_DIR / f"phase_a_subject_{subject_id}.pt"
+    proto_file = CHECKPOINT_DIR / f"prototypes_subject_{subject_id}.pt"
     artifact_file = ckpt_file.parent / f"evaluation_subject_{subject_id}.json"
 
 if not ckpt_file.exists() or not proto_file.exists():
@@ -624,10 +641,10 @@ with tab_cross_subject:
             run_records = subject_manifest_runs
         else:
             run_records = [{
-                "checkpoint": f"results/checkpoints/phase_a_subject_{s}.pt",
+                "checkpoint": str(CHECKPOINT_DIR / f"phase_a_subject_{s}.pt"),
                 "evaluation_artifact": (
                     artifact_file if s == subject_id
-                    else Path(f"results/checkpoints/evaluation_subject_{s}.json")
+                    else CHECKPOINT_DIR / f"evaluation_subject_{s}.json"
                 ),
                 "seed": "legacy",
             }]
