@@ -13,6 +13,7 @@ from plotly.subplots import make_subplots
 import streamlit as st
 import torch
 
+from neurostream.dashboard.helpers import resolve_repo_path, trial_slider_key
 from neurostream.dashboard.simulation import ReplaySimulationData, TrialReplayEngine
 from neurostream.evaluation.artifacts import load_evaluation_artifact
 
@@ -25,13 +26,6 @@ CHECKPOINT_DIR = next(
     ) if path.is_dir()),
     (PROJECT_ROOT / 'results' / 'checkpoints').resolve(),
 )
-
-def resolve_repo_path(value: str | Path) -> Path:
-    path = Path(value).expanduser()
-    if path.is_absolute():
-        return path
-    candidates = (PROJECT_ROOT / path, PROJECT_ROOT / 'scripts' / path)
-    return next((candidate.resolve() for candidate in candidates if candidate.exists()), candidates[0].resolve())
 
 # ── Page Configuration & Enterprise Styling ────────────────────────────────────
 
@@ -346,28 +340,27 @@ with tab_replay:
     # Playback Controls Bar
     ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2.4, 1.0, 1.0])
 
-    if "trial_slider" not in st.session_state:
-        st.session_state["trial_slider"] = total_steps
+    slider_key = trial_slider_key(subject_id, projection_type)
 
-    def _jump_to(step_val: int):
-        st.session_state["trial_slider"] = step_val
+    def _jump_to(widget_key: str, step_val: int):
+        st.session_state[widget_key] = step_val
 
     with ctrl_col2:
         st.write("")
         st.write("")
-        st.button("⏩ Jump to End", width="stretch", on_click=_jump_to, args=(total_steps,))
+        st.button("⏩ Jump to End", width="stretch", on_click=_jump_to, args=(slider_key, total_steps))
 
     with ctrl_col3:
         st.write("")
         st.write("")
-        st.button("⏮️ Jump to Start", width="stretch", on_click=_jump_to, args=(1,))
+        st.button("⏮️ Jump to Start", width="stretch", on_click=_jump_to, args=(slider_key, 1))
 
     with ctrl_col1:
         current_step = st.slider(
             "Streaming Replay Position (Trial Index)",
             min_value=1,
             max_value=total_steps,
-            key=f"trial_slider_{subject_id}_{projection_type}",
+            key=slider_key,
             help="Drag to inspect prototype positions, confidence scores, and adaptation decisions at any timestep.",
         )
 
@@ -693,8 +686,8 @@ with tab_cross_subject:
         checkpoint_data_rows = []
         valid_seeds = []
         for run_record in run_records:
-            c_p = Path(run_record["checkpoint"])
-            artifact_path = Path(run_record["evaluation_artifact"])
+            c_p = resolve_repo_path(run_record["checkpoint"])
+            artifact_path = resolve_repo_path(run_record["evaluation_artifact"])
             if not c_p.exists() or not artifact_path.exists():
                 continue
             try:
