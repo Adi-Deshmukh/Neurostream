@@ -120,12 +120,17 @@ class TrialReplayEngine:
         if projection_method.upper() == "UMAP":
             try:
                 import umap
-                self.projector = umap.UMAP(n_components=2, random_state=42, min_dist=0.3, n_neighbors=15)
-                self.projector.fit(self.s1_features)
-            except Exception:
+            except ImportError:
+                # Fall back only when the optional dependency is unavailable.
+                # Data/configuration errors during fitting must remain visible.
                 self.projector = PCA(n_components=2, random_state=42)
                 self.projector.fit(self.s1_features)
-                self.projection_method = "PCA (Fallback)"
+                self.projection_method = "PCA (UMAP unavailable; fallback)"
+            else:
+                self.projector = umap.UMAP(
+                    n_components=2, random_state=42, min_dist=0.3, n_neighbors=15
+                )
+                self.projector.fit(self.s1_features)
         else:
             self.projector = PCA(n_components=2, random_state=42)
             self.projector.fit(self.s1_features)
