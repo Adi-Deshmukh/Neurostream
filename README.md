@@ -41,6 +41,17 @@ python -c "from neurostream.dashboard.simulation import TrialReplayEngine; print
 
 Then navigate to `http://localhost:8501` in your browser.
 
+The dashboard includes these research views:
+
+- **Offline Trial Replay:** precomputed trial-by-trial adaptation with safe trial navigation.
+- **EEG Signal Analysis:** preprocessed trial waveforms, power spectral density, and per-channel alpha/beta/gamma band-power heatmaps. EEG epochs are held in application memory for up to 15 minutes and are not written to the prepared feature cache.
+- **Model Diagnostics:** static Session 2 confusion matrix, class-wise accuracy, prototype cosine similarity, feature-centroid alignment, and feature-norm distributions.
+- **Cross-Subject Benchmarks:** metrics from validated evaluation artifacts.
+- **Measured Spike Activity:** measured activity fractions and paired consolidation ON/OFF replay diagnostics.
+- **Platform Guide:** model and experimental protocol notes.
+
+Replay parameter sliders are grouped in a form: change the values and click **Apply replay settings** to run the selected configuration. The trial-position slider and Jump to Start/End buttons navigate the already-computed replay without rerunning the model.
+
 ### Fast dashboard startup: precompute replay features once
 
 The first dashboard load for a subject/projection may load BNCI2014-001, apply the
