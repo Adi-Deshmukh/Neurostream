@@ -58,6 +58,11 @@ uses a prepared cache only when its subject and checkpoint SHA-256 match the
 currently selected checkpoint. If no cache exists, it falls back to the original
 on-demand preparation path and shows the command needed to generate the cache.
 
+The dashboard uses a sidebar research-view navigator rather than eager tabs.
+Only the selected view is computed: the replay engine is not initialized when
+viewing the benchmark table or platform guide, and the nine-subject benchmark
+loop does not run while inspecting the replay page.
+
 **Storage contract:** the prepared cache stores SNN feature matrices, labels,
 prototypes, projection state, measured activity, and provenance. It deliberately
 does not store raw EEG epochs or encoded spike tensors. The cache is local,
