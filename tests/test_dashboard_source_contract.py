@@ -67,6 +67,8 @@ def test_chart_width_arguments_remain_compatible_with_streamlit_baseline():
 
 
 def test_all_dashboard_pages_render_without_experiment_artifacts():
+    from types import SimpleNamespace
+    import numpy as np
     from streamlit.testing.v1 import AppTest
 
     app = AppTest.from_file(str(APP_PATH), default_timeout=20).run()
@@ -79,3 +81,26 @@ def test_all_dashboard_pages_render_without_experiment_artifacts():
     for page_name in page_names:
         app.sidebar.radio[0].set_value(page_name).run()
         assert not app.exception, f"Dashboard page failed to render: {page_name}"
+
+    # Inject small deterministic epochs so the signal charts render without
+    # triggering MOABB downloads or relying on a local dataset cache.
+    fixture = SimpleNamespace(
+        X=np.random.default_rng(7).normal(size=(3, 2, 1000)).astype("float32"),
+        y=np.array([1, 2, 1]),
+        sfreq=250.0,
+        channel_names=("C3", "C4"),
+        tmin=2.0, tmax=6.0, epoch_reference="trial_start",
+        l_freq=4.0, h_freq=100.0,
+    )
+    app.session_state["ns_signal_sessions"] = {
+        "0train": fixture, "1test": fixture,
+    }
+    app.session_state["ns_signal_subject"] = 1
+    app.sidebar.radio[0].set_value("Signal Analysis").run()
+    assert not app.exception, "Signal Analysis failed to render fixture epochs"
+    power_button = next(
+        button for button in app.button
+        if button.label == "Compute channel × band power"
+    )
+    power_button.click().run()
+    assert not app.exception, "Signal band-power visualization failed to render"
