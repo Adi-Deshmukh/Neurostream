@@ -28,7 +28,7 @@ from neurostream.dashboard.registry import (
 ROOT = project_root()
 PAGES = (
     "Overview", "Signal Analysis", "Model Diagnostics", "Adaptation Replay",
-    "Benchmark Lab", "Consolidation Study", "Experiment Registry",
+    "Benchmark Lab", "Consolidation Study", "Experiment Registry", "Visual Analytics",
 )
 CLASS_COLORS = ("#3976A8", "#269B83", "#D39A45", "#8B79B8")
 
@@ -156,7 +156,7 @@ if st.sidebar.button("Refresh artifact registry"):
     st.session_state.ns_registry = discover_experiments(ROOT)
     st.rerun()
 
-run = selected_run(registry) if page in ("Overview", "Signal Analysis", "Model Diagnostics", "Adaptation Replay") else None
+run = selected_run(registry) if page in ("Overview", "Signal Analysis", "Model Diagnostics", "Adaptation Replay", "Visual Analytics") else None
 
 if page == "Overview":
     header("Experiment overview", "Validated cross-session results. Every displayed metric is sourced from a checkpoint-matched evaluation artifact.")
@@ -385,6 +385,19 @@ elif page == "Signal Analysis":
         if flat_channels:
             st.warning("Flat channels: " + ", ".join(flat_channels))
         st.info("The loader returns preprocessed epochs, not raw continuous EEG. Raw, filtered-only and normalized-stage signals are not separately retained here; the displayed waveform must not be labelled raw.")
+
+elif page == "Visual Analytics":
+    from neurostream.dashboard.visual_analytics import render_visual_analytics
+
+    render_visual_analytics(
+        root=ROOT,
+        valid_runs=valid,
+        selected_run=run,
+        render_plotly=render_plotly,
+        confusion_figure=confusion_figure,
+        discover_ablation_reports=discover_ablation_reports,
+        paired_ablation_rows=paired_ablation_rows,
+    )
 
 elif page == "Model Diagnostics":
     header("Model diagnostics", "Feature-space and measured spike-activity diagnostics from the selected prepared replay artifact.")
