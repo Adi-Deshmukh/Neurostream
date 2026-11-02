@@ -164,20 +164,19 @@ after adding or regenerating local experiment artifacts.
 
 ## 🧪 Testing & Verification
 
-The codebase includes an automated unit test suite covering all modules:
+Install the project and run the complete suite from the repository root:
 
 ```powershell
-& ".\FYP\Scripts\python.exe" -m pytest tests/ -v
+python -m pip install -e ".[dashboard]"
+python -m pytest -q
+python -m compileall -q src tests scripts
 ```
 
-**Test Coverage Summary (54/54 Passed)**:
-- `test_cross_session_sweep.py`: Multi-subject deterministic seeding and sweep execution.
-- `test_simulation.py`: Replay engine step progression, 2D basis consistency, and prototype tracking.
-- `test_lif_neuron.py`: Leaky Integrate-and-Fire membrane dynamics, threshold firing, and reset mechanics.
-- `test_snn_feature_extractor.py`: Two-layer SNN feature extractor forward passes and surrogate gradient backprop.
-- `test_sleep_consolidation.py`: Synthetic feature generation, cosine loss computation, and prototype anchor pulls.
-- `test_spike_encoder.py`: Rate and TTFS spike encoding, output sparsity bounds, and tensor dimensions.
-- `test_metrics.py`: Accuracy, adaptation gain, retention, forgetting, and forward-hook sparsity trackers.
-
+The suite covers model layers, spike encoding, training/adaptation, evaluation
+artifacts, replay behavior, dashboard registry discovery, paired ablation joins
+and dashboard source contracts. The GitHub Actions workflow also runs the test
+suite, compiles Python sources and smoke-tests dashboard dependencies. A passing
+CI run does not replace a local browser walkthrough with the user's actual
+checkpoints and prepared caches.
 
 **Dataset storage:** raw MOABB/MNE downloads are local machine caches and are excluded from Git under `data/mne_data/`. If you previously relied on the repository-tracked copy, MOABB may need to download the BNCI2014-001 files again or be pointed at your existing local MNE data directory.
