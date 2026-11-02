@@ -268,7 +268,7 @@ if requires_replay:
             value=0.5, step=0.1, key="replay_pull_rate",
         )
         apply_replay_config = st.form_submit_button(
-            "Apply replay settings", type="primary", width="stretch"
+            "Apply replay settings", type="primary", use_container_width=True
         )
 
 else:
@@ -485,13 +485,13 @@ if active_page == "Offline Trial Replay":
     with ctrl_col2:
         st.write("")
         st.write("")
-        if st.button("⏩ Jump to End", width="stretch", key="jump_replay_end"):
+        if st.button("⏩ Jump to End", use_container_width=True, key="jump_replay_end"):
             st.session_state[slider_key] = total_steps
 
     with ctrl_col3:
         st.write("")
         st.write("")
-        if st.button("⏮️ Jump to Start", width="stretch", key="jump_replay_start"):
+        if st.button("⏮️ Jump to Start", use_container_width=True, key="jump_replay_start"):
             st.session_state[slider_key] = 1
 
     with ctrl_col1:
@@ -685,7 +685,7 @@ if active_page == "Offline Trial Replay":
                 font=dict(size=11),
             ),
         )
-        st.plotly_chart(fig_manifold, width="stretch")
+        st.plotly_chart(fig_manifold, use_container_width=True)
 
     with side_col:
         st.markdown("**📈 Online Adaptation vs. Static SNN Baseline**")
@@ -731,7 +731,7 @@ if active_page == "Offline Trial Replay":
         fig_dyn.update_yaxes(gridcolor="#F1F5F9", row=2, col=1)
         fig_dyn.update_xaxes(gridcolor="#F1F5F9", row=2, col=1, title_text="Trial Index")
 
-        st.plotly_chart(fig_dyn, width="stretch")
+        st.plotly_chart(fig_dyn, use_container_width=True)
 
         st.markdown(
             f"""
@@ -889,7 +889,7 @@ if active_page == "Cross-Subject Benchmarks":
         })
 
     df_results = pd.DataFrame(table_data)
-    st.dataframe(df_results, width="stretch")
+    st.dataframe(df_results, use_container_width=True)
 
     if heatmap_records:
         metric_labels = {
@@ -920,7 +920,7 @@ if active_page == "Cross-Subject Benchmarks":
             height=max(300, 42 * len(heatmap_frame.index) + 100),
             margin=dict(l=10, r=10, t=55, b=10),
         )
-        st.plotly_chart(heatmap_fig, width="stretch")
+        st.plotly_chart(heatmap_fig, use_container_width=True)
     else:
         st.info("No validated subject/seed evaluation artifacts are available for the heatmap.")
 
@@ -947,7 +947,7 @@ if active_page == "Cross-Subject Benchmarks":
             yaxis=dict(gridcolor="#F1F5F9"),
             legend=dict(orientation="h", y=1.1, x=0),
         )
-        st.plotly_chart(fig_acc, width="stretch")
+        st.plotly_chart(fig_acc, use_container_width=True)
 
     with chart_c2:
         # Train vs Val vs Test Generalization Gap
@@ -968,7 +968,7 @@ if active_page == "Cross-Subject Benchmarks":
             yaxis=dict(gridcolor="#F1F5F9"),
             legend=dict(orientation="h", y=1.1, x=0),
         )
-        st.plotly_chart(fig_gap, width="stretch")
+        st.plotly_chart(fig_gap, use_container_width=True)
 
 
 # =============================================================================
@@ -1022,7 +1022,7 @@ if active_page == "Measured Spike Activity":
             plot_bgcolor="rgba(0,0,0,0)",
             paper_bgcolor="rgba(0,0,0,0)",
         )
-        st.plotly_chart(fig_donut, width="stretch")
+        st.plotly_chart(fig_donut, use_container_width=True)
 
         # Layer-by-layer sparsity comparison bar
         layer_names = []
@@ -1058,7 +1058,7 @@ if active_page == "Measured Spike Activity":
             yaxis=dict(gridcolor="#F1F5F9", range=[0, 45]),
         )
         if layer_vals:
-            st.plotly_chart(fig_layers, width="stretch")
+            st.plotly_chart(fig_layers, use_container_width=True)
         else:
             st.info("No valid spike-activity measurements are available for this run.")
 
@@ -1114,7 +1114,7 @@ if active_page == "Measured Spike Activity":
                 "Session 1 train retention": "{:.2f}%",
                 "Session 1 forgetting": "{:.2f} pp",
             }),
-            width="stretch",
+            use_container_width=True,
         )
         ablation_fig = go.Figure()
         for metric_name in (
@@ -1133,7 +1133,7 @@ if active_page == "Measured Spike Activity":
             height=380,
             margin=dict(l=10, r=10, t=55, b=10),
         )
-        st.plotly_chart(ablation_fig, width="stretch")
+        st.plotly_chart(ablation_fig, use_container_width=True)
         st.caption(
             "Session 1 retention is measured on the Session 1 training features "
             "used by this replay engine. It is an in-sample diagnostic, not "
@@ -1223,7 +1223,7 @@ if active_page == "Model Diagnostics":
                 height=420,
                 margin=dict(l=10, r=10, t=55, b=10),
             )
-            st.plotly_chart(confusion_fig, width="stretch")
+            st.plotly_chart(confusion_fig, use_container_width=True)
         with diagnostic_cols[1]:
             accuracy_fig = go.Figure(go.Bar(
                 x=class_names,
@@ -1241,7 +1241,7 @@ if active_page == "Model Diagnostics":
                 height=420,
                 margin=dict(l=10, r=10, t=55, b=10),
             )
-            st.plotly_chart(accuracy_fig, width="stretch")
+            st.plotly_chart(accuracy_fig, use_container_width=True)
 
     st.markdown("#### Prototype geometry")
     prototype_norms = np.linalg.norm(prototypes, axis=1, keepdims=True)
@@ -1264,7 +1264,7 @@ if active_page == "Model Diagnostics":
         height=430,
         margin=dict(l=10, r=10, t=55, b=10),
     )
-    st.plotly_chart(similarity_fig, width="stretch")
+    st.plotly_chart(similarity_fig, use_container_width=True)
 
     centroid_fig = go.Figure()
     for session_name, features, labels in (
@@ -1299,7 +1299,7 @@ if active_page == "Model Diagnostics":
         height=390,
         margin=dict(l=10, r=10, t=55, b=10),
     )
-    st.plotly_chart(centroid_fig, width="stretch")
+    st.plotly_chart(centroid_fig, use_container_width=True)
 
     st.markdown("#### Feature-norm distributions")
     norm_fig = go.Figure()
@@ -1322,7 +1322,7 @@ if active_page == "Model Diagnostics":
         height=430,
         margin=dict(l=10, r=10, t=55, b=10),
     )
-    st.plotly_chart(norm_fig, width="stretch")
+    st.plotly_chart(norm_fig, use_container_width=True)
     st.caption(
         "Feature-centroid alignment and feature norms are descriptive diagnostics. "
         "They do not establish statistical significance or generalization. "
@@ -1419,7 +1419,7 @@ if active_page == "EEG Signal Analysis":
         height=390,
         margin=dict(l=15, r=15, t=55, b=15),
     )
-    st.plotly_chart(waveform_fig, width="stretch")
+    st.plotly_chart(waveform_fig, use_container_width=True)
 
     from scipy.signal import welch
 
@@ -1446,7 +1446,7 @@ if active_page == "EEG Signal Analysis":
         height=350,
         margin=dict(l=15, r=15, t=55, b=15),
     )
-    st.plotly_chart(psd_fig, width="stretch")
+    st.plotly_chart(psd_fig, use_container_width=True)
 
     frequency_bands = {
         "Alpha 8–13 Hz": (8.0, 13.0),
@@ -1485,8 +1485,8 @@ if active_page == "EEG Signal Analysis":
             height=max(420, min(760, 22 * n_channels + 180)),
             margin=dict(l=15, r=15, t=55, b=15),
         )
-        st.plotly_chart(heatmap_fig, width="stretch")
-        st.dataframe(pd.DataFrame(band_power_rows), hide_index=True, width="stretch")
+        st.plotly_chart(heatmap_fig, use_container_width=True)
+        st.dataframe(pd.DataFrame(band_power_rows), hide_index=True, use_container_width=True)
 
     st.caption(
         f"Preprocessing: {signal_session.l_freq:g}–{signal_session.h_freq:g} Hz "
