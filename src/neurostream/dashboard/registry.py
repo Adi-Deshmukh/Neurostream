@@ -26,6 +26,26 @@ def resolve_artifact_path(root: Path, value: str | Path) -> Path:
     return next((item.resolve() for item in options if item.exists()), options[0].resolve())
 
 
+def load_preprocessing_contract(
+    checkpoint_path: Path, expected_sha256: str | None = None
+) -> dict[str, Any]:
+    """Read checkpoint metadata without constructing a model or loading custom objects."""
+    import hashlib
+    import torch
+
+    checkpoint_path = Path(checkpoint_path)
+    digest = hashlib.sha256(checkpoint_path.read_bytes()).hexdigest()
+    if expected_sha256 is not None and digest != expected_sha256:
+        raise ValueError("checkpoint SHA-256 changed since the registry was validated")
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    if not isinstance(payload, dict):
+        raise ValueError("checkpoint root must be a state dictionary")
+    contract = payload.get("preprocessing_contract")
+    if not isinstance(contract, dict):
+        raise ValueError("checkpoint does not contain a preprocessing contract")
+    return contract
+
+
 def _manifest_paths(root: Path) -> list[Path]:
     bases = (root / "results", root / "scripts" / "results")
     found = set()
