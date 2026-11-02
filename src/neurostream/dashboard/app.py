@@ -363,7 +363,7 @@ def load_engine(
     )
 
 
-@st.cache_data(show_spinner="Simulating streaming trial adaptation...")
+@st.cache_resource(show_spinner="Simulating streaming trial adaptation...")
 def run_cached_replay(
     _eng: TrialReplayEngine,
     replay_identity: str,
