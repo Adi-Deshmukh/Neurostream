@@ -86,9 +86,13 @@ class TrialReplayEngine:
         subject: int = 1,
         run_id: str | None = None,
         checkpoint_ref: str = "in-memory",
+        prototypes_ref: str | None = None,
     ) -> None:
         self.subject = subject
         self.checkpoint_ref = checkpoint_ref
+        self.prototypes_ref = prototypes_ref or hashlib.sha256(
+            initial_prototypes.detach().cpu().numpy().tobytes()
+        ).hexdigest()
         self.run_id = run_id or hashlib.sha256(
             np.asarray(session2_spikes).tobytes()
         ).hexdigest()[:16]
@@ -309,6 +313,7 @@ class TrialReplayEngine:
             "subject": self.subject,
             "class_names": self.class_names,
             "checkpoint_ref": self.checkpoint_ref,
+            "prototypes_ref": self.prototypes_ref,
             "run_id": self.run_id,
             "projection_method": self.projection_method,
             "initial_target_accuracy": self.initial_target_accuracy,
@@ -329,6 +334,7 @@ class TrialReplayEngine:
         *,
         checkpoint_ref: str,
         subject: int,
+        prototypes_ref: str | None = None,
     ) -> "TrialReplayEngine":
         """Load feature-only replay artifacts after validating their provenance."""
         target = Path(artifact_dir)
@@ -339,6 +345,8 @@ class TrialReplayEngine:
             raise ValueError("prepared replay artifact subject mismatch")
         if metadata.get("checkpoint_ref") != checkpoint_ref:
             raise ValueError("prepared replay artifact checkpoint hash mismatch")
+        if prototypes_ref is not None and metadata.get("prototypes_ref") != prototypes_ref:
+            raise ValueError("prepared replay artifact prototype hash mismatch")
         if metadata.get("contains_raw_eeg") or metadata.get("contains_encoded_spikes"):
             raise ValueError("prepared artifact violates feature-only storage contract")
 
@@ -399,6 +407,7 @@ class TrialReplayEngine:
 
         instance.subject = int(subject)
         instance.checkpoint_ref = checkpoint_ref
+        instance.prototypes_ref = str(metadata["prototypes_ref"])
         instance.run_id = str(metadata["run_id"])
         instance.class_names = list(metadata["class_names"])
         instance.projection_method = str(metadata["projection_method"])
@@ -488,4 +497,5 @@ class TrialReplayEngine:
             subject=subject,
             run_id=f"{checkpoint_ref[:16]}-subject-{subject}",
             checkpoint_ref=checkpoint_ref,
+            prototypes_ref=hashlib.sha256(Path(prototypes_path).read_bytes()).hexdigest(),
         )
