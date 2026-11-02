@@ -185,7 +185,7 @@ elif page == "Signal Analysis":
             st.error("EEG session loading failed. Check the MOABB dataset cache, network access and preprocessing dependencies.")
             st.exception(error)
     sessions = st.session_state.get("ns_signal_sessions")
-    if sessions is None or st.session_state.get("ns_signal_subject") != subject:
+    if not sessions or st.session_state.get("ns_signal_subject") != subject:
         st.info("EEG is not loaded. Select a subject and click Load EEG sessions. This operation is separate from dashboard navigation.")
     else:
         names = list(sessions)
@@ -308,6 +308,8 @@ elif page == "Model Diagnostics":
             for metadata_path in cache_root.glob("*/metadata.json"):
                 try:
                     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                    if not isinstance(metadata, dict):
+                        continue
                     if (
                         metadata.get("checkpoint_ref") == artifact.get("checkpoint_sha256")
                         and int(metadata.get("subject", -1)) == int(run["subject"])
@@ -318,8 +320,10 @@ elif page == "Model Diagnostics":
         if matching_metadata:
             metadata_path, metadata = matching_metadata[0]
             measured = metadata.get("measurement", {})
+            if not isinstance(measured, dict):
+                measured = {}
             layer_rates = measured.get("layer_activity_fraction", {})
-            if layer_rates:
+            if isinstance(layer_rates, dict) and layer_rates:
                 layer_fig = go.Figure(go.Bar(
                     x=list(layer_rates), y=list(layer_rates.values()),
                     marker_color="#269B83",
