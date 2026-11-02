@@ -23,7 +23,12 @@ def _default_checkpoint_dir() -> Path:
         PROJECT_ROOT / "results" / "checkpoints",
         PROJECT_ROOT / "scripts" / "results" / "checkpoints",
     )
-    return next((path for path in candidates if path.is_dir()), candidates[0])
+    for path in candidates:
+        if (path / "phase_a_subject_1.pt").is_file():
+            return path
+        if any(path.glob("sub_*/seed_*/phase_a_subject_*.pt")):
+            return path
+    return candidates[0]
 
 
 def main() -> None:
