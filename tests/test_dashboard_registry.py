@@ -1,7 +1,9 @@
 from pathlib import Path
 import json
 
-from neurostream.dashboard.registry import discover_experiments, paired_ablation_rows
+from neurostream.dashboard.registry import (
+    discover_experiments, load_preprocessing_contract, paired_ablation_rows,
+)
 from neurostream.evaluation.artifacts import save_evaluation_artifact
 
 
@@ -116,3 +118,21 @@ def test_registry_lists_checkpoint_without_claiming_evaluation(tmp_path):
     assert rows[0]["seed"] is None
     assert rows[0]["status"] == "checkpoint_without_manifest"
     assert rows[0]["metrics"] == {}
+
+
+def test_checkpoint_preprocessing_contract_is_read_without_model_construction(tmp_path):
+    import hashlib
+    import torch
+
+    checkpoint = tmp_path / "phase_a_subject_1.pt"
+    expected = {
+        "sampling_frequency_hz": 250.0,
+        "epoch_window_seconds": {"tmin": 2.0, "tmax": 6.0},
+        "normalization": {"method": "per_trial_demean_preserve_channel_scale"},
+    }
+    torch.save({
+        "model_state_dict": {"weight": torch.ones(2)},
+        "preprocessing_contract": expected,
+    }, checkpoint)
+    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    assert load_preprocessing_contract(checkpoint, digest) == expected
