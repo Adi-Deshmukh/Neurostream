@@ -18,6 +18,8 @@ results/
 .mypy_cache/
 coverage.xml
 
+# Local dataset downloads (MOABB / MNE); regenerate locally, never commit raw EEGdata/mne_data/
+
 # Dashboard and local scientific-computing caches
 .cache/
 .mne/
