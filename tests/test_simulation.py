@@ -126,3 +126,28 @@ def test_prepared_artifact_rejects_checkpoint_mismatch(mock_replay_engine, tmp_p
             checkpoint_ref="wrong-checkpoint-hash",
             subject=mock_replay_engine.subject,
         )
+
+
+def test_sleep_consolidation_replay_is_reproducible(mock_replay_engine):
+    engine = mock_replay_engine
+    kwargs = {
+        "momentum": 0.9,
+        "confidence_threshold": 0.5,
+        "enable_consolidation": True,
+        "consolidation_interval": 5,
+        "sleep_steps": 2,
+        "pull_rate": 0.5,
+    }
+    first = engine.run_replay(**kwargs)
+    second = engine.run_replay(**kwargs)
+
+    assert first.adapted_target_accuracy == pytest.approx(
+        second.adapted_target_accuracy
+    )
+    assert first.session1_retention_accuracy == pytest.approx(
+        second.session1_retention_accuracy
+    )
+    np.testing.assert_allclose(
+        first.prototype_history_2d,
+        second.prototype_history_2d,
+    )
