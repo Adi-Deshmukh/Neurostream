@@ -307,6 +307,8 @@ elif page == "Signal Analysis":
                           xaxis_title="Time (s) from epoch start", yaxis_title="Amplitude (preprocessed units)", height=380)
         st.plotly_chart(fig, use_container_width=True)
         st.caption(f"Sampling rate: {data.sfreq:g} Hz · epoch: {data.tmin:g} to {data.tmax:g} s relative to {data.epoch_reference} · preprocessing: {data.l_freq:g}–{data.h_freq:g} Hz band-pass.")
+        if data.epoch_reference == "trial_start":
+            st.caption("The dataset event marks trial start, which precedes this epoch. The dashed line marks the imagery cue onset when it falls inside the selected window.")
         if st.session_state.get("ns_signal_contract"):
             st.caption(f"Checkpoint preprocessing contract: {st.session_state['ns_signal_contract']}")
         if st.button("Compute channel × band power"):
@@ -317,7 +319,7 @@ elif page == "Signal Analysis":
             for _, (lo, hi) in bands.items():
                 mask = (freqs >= lo) & (freqs < hi)
                 z.append(np.trapz(psd[:, mask], freqs[mask], axis=1) if mask.any() else np.full(data.X.shape[1], np.nan))
-            heat = go.Figure(go.Heatmap(z=np.asarray(z).T, x=list(bands), y=channel_names, colorscale="Viridis", colorbar_title="Power"))
+            heat = go.Figure(go.Heatmap(z=np.asarray(z).T, x=list(bands), y=channel_names, colorscale="Viridis", colorbar_title="Power (preprocessed units²)"))
             heat.update_layout(title="Channel × frequency-band power · selected trial", xaxis_title="Frequency band", yaxis_title="EEG channel", height=620)
             st.plotly_chart(heat, use_container_width=True)
         st.markdown("#### Session 1 vs Session 2")
