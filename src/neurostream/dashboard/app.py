@@ -340,7 +340,7 @@ with tab_replay:
     # Playback Controls Bar
     ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2.4, 1.0, 1.0])
 
-    slider_key = trial_slider_key(subject_id, projection_type)
+    slider_key = trial_slider_key(subject_id, projection_type, ckpt_file.stem)
 
     def _jump_to(widget_key: str, step_val: int):
         st.session_state[widget_key] = step_val
