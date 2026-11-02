@@ -113,3 +113,23 @@ python -m streamlit run dashboard/app.py
 If replay cache is absent, use the exact checkpoint and prototype paths printed
 on the Adaptation Replay page. Do not use a default checkpoint path when the
 selected run belongs to a nested subject/seed sweep directory.
+
+## Implementation changelog
+
+- Replaced `src/neurostream/dashboard/app.py` with a seven-page, artifact-first
+  Streamlit workstation and explicit session-scoped replay state.
+- Added `src/neurostream/dashboard/registry.py` for recursive manifest discovery,
+  checkpoint/evaluation hash validation, orphan checkpoint visibility, paired
+  ablation joins and safe checkpoint preprocessing-contract extraction.
+- Hardened `scripts/precompute_dashboard_artifacts.py` so its default checkpoint
+  directory is selected by actual checkpoint-file presence, not merely by an
+  existing empty directory.
+- Added dashboard source, registry, artifact-validation and Streamlit AppTest
+  coverage under `tests/test_dashboard_source_contract.py` and
+  `tests/test_dashboard_registry.py`.
+- Rewrote the dashboard guide and verification instructions in `README.md`.
+- Added this audit/performance report.
+- Updated `.gitignore` for local MOABB/MNE dataset downloads and generated
+  `scripts/results/` outputs. Removed the tracked local EEG cache copies,
+  Matplotlib cache, bytecode file and empty DOCX placeholder. Retained the
+  existing small Phase A checkpoint/prototype pair.
