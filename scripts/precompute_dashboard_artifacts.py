@@ -9,6 +9,7 @@ not persist raw EEG epochs or encoded spike tensors.
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 import sys
 
@@ -48,8 +49,11 @@ def main() -> None:
     if not prototypes.is_file():
         raise FileNotFoundError(f"prototypes not found: {prototypes}")
 
+    checkpoint_hash = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    prototype_hash = hashlib.sha256(prototypes.read_bytes()).hexdigest()
     artifact_dir = args.output_root.resolve() / (
-        f"subject_{args.subject}_{checkpoint.stem}_{args.projection.lower()}"
+        f"subject_{args.subject}_{checkpoint.stem}_"
+        f"{checkpoint_hash[:12]}_{prototype_hash[:12]}_{args.projection.lower()}"
     )
     print(f"Preparing subject S{args.subject:02d} ({args.projection})")
     print("This one-time operation loads the dataset, applies the checkpoint encoder, and extracts SNN features.")
