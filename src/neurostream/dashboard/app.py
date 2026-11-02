@@ -520,15 +520,15 @@ elif page == "Adaptation Replay":
         cache_inputs = (
             cache_file, cache_dir / "features.npz", cache_dir / "projector.joblib"
         )
-        if not all(path.is_file() for path in cache_inputs):
+        if not prototype.is_file():
+            st.warning(f"Prototype file not found next to selected checkpoint: {prototype}")
+        elif not all(path.is_file() for path in cache_inputs):
             st.warning(f"Prepared replay cache is missing or incomplete: {cache_dir}")
             st.code(
                 f'python scripts/precompute_dashboard_artifacts.py --subject {subject} '
                 f'--checkpoint "{checkpoint}" --prototypes "{prototype}" --projection {projection}',
                 language="bash",
             )
-        elif not prototype.is_file():
-            st.warning(f"Prototype file not found next to selected checkpoint: {prototype}")
         else:
             cache_signature = ":".join(
                 f"{path.stat().st_mtime_ns}-{path.stat().st_size}"
