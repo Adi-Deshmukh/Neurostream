@@ -33,6 +33,39 @@ CHECKPOINT_DIR = next(
     (PROJECT_ROOT / 'results' / 'checkpoints').resolve(),
 )
 
+
+def _resolve_subject_checkpoint(subject_id: int):
+    """Return (ckpt_path, proto_path) for a subject using seed_42 if available.
+
+    The seed-based checkpoints under sub_N/seed_42/ include the encoder_calibration
+    field required by TrialReplayEngine.from_checkpoint().
+    """
+    seed_ckpt = (
+        CHECKPOINT_DIR / f"sub_{subject_id}" / "seed_42"
+        / f"phase_a_subject_{subject_id}.pt"
+    )
+    seed_proto = (
+        CHECKPOINT_DIR / f"sub_{subject_id}" / "seed_42"
+        / f"prototypes_subject_{subject_id}.pt"
+    )
+    if seed_ckpt.exists() and seed_proto.exists():
+        return seed_ckpt, seed_proto
+    return (
+        CHECKPOINT_DIR / f"phase_a_subject_{subject_id}.pt",
+        CHECKPOINT_DIR / f"prototypes_subject_{subject_id}.pt",
+    )
+
+
+def _resolve_subject_artifact(subject_id: int) -> Path:
+    """Return evaluation artifact path for a subject, preferring seed_42."""
+    candidates = [
+        PROJECT_ROOT / "results" / "evaluations"
+        / f"sub_{subject_id}" / "seed_42" / f"subject_{subject_id}_seed_42.json",
+        CHECKPOINT_DIR / f"evaluation_subject_{subject_id}.json",
+    ]
+    return next((p for p in candidates if p.exists()), candidates[-1])
+
+
 # ── Page Configuration & Enterprise Styling ────────────────────────────────────
 
 st.set_page_config(
@@ -201,9 +234,8 @@ if selected_run is not None:
     artifact_file = resolve_repo_path(PROJECT_ROOT, selected_run["evaluation_artifact"])
     proto_file = ckpt_file.with_name(f"prototypes_subject_{subject_id}.pt")
 else:
-    ckpt_file = CHECKPOINT_DIR / f"phase_a_subject_{subject_id}.pt"
-    proto_file = CHECKPOINT_DIR / f"prototypes_subject_{subject_id}.pt"
-    artifact_file = ckpt_file.parent / f"evaluation_subject_{subject_id}.json"
+    ckpt_file, proto_file = _resolve_subject_checkpoint(subject_id)
+    artifact_file = _resolve_subject_artifact(subject_id)
 
 projection_type = st.sidebar.radio(
     "2D Reference Basis",
@@ -222,6 +254,7 @@ active_page = st.sidebar.radio(
         "Measured Spike Activity",
         "Platform Guide",
     ],
+    index=5,
     key="dashboard_research_view",
 )
 requires_replay = active_page in ("Offline Trial Replay", "Measured Spike Activity")
@@ -230,50 +263,45 @@ if requires_replay:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### ⚙️ Replay Configuration")
     st.sidebar.caption(
-        "Adjust the parameters, then apply them once. This prevents every slider "
-        "movement from launching a complete replay."
+        "Adjust the parameters to update the cached replay."
     )
-    with st.sidebar.form("replay_configuration_form"):
-        momentum = st.slider(
-            "Prototype Momentum (1 - α)",
-            min_value=0.50,
-            max_value=0.99,
-            value=0.90,
-            step=0.01,
-            key="replay_momentum",
-            help="Higher values adapt more smoothly; lower values follow distribution shifts more quickly.",
-        )
-        confidence_thresh = st.slider(
-            "Confidence Threshold (τ)",
-            min_value=0.25,
-            max_value=0.95,
-            value=0.60,
-            step=0.05,
-            key="replay_confidence_threshold",
-            help="Minimum cosine softmax confidence required to update prototype positions.",
-        )
-        st.markdown("#### Sleep Consolidation")
-        enable_consolidation = st.checkbox(
-            "Enable Sleep Consolidation",
-            value=True,
-            key="replay_enable_consolidation",
-            help="Uses synthetic noisy feature snapshots around Session 1 prototypes.",
-        )
-        cons_interval = st.number_input(
-            "Interval (steps)", min_value=10, max_value=100, value=25, step=5,
-            key="replay_consolidation_interval",
-        )
-        sleep_steps = st.number_input(
-            "Correction Iterations", min_value=1, max_value=15, value=5,
-            key="replay_sleep_steps",
-        )
-        pull_rate = st.slider(
-            "Pull Strength (λ)", min_value=0.1, max_value=1.0,
-            value=0.5, step=0.1, key="replay_pull_rate",
-        )
-        apply_replay_config = st.form_submit_button(
-            "Apply replay settings", type="primary", use_container_width=True
-        )
+    momentum = st.sidebar.slider(
+        "Prototype Momentum (1 - α)",
+        min_value=0.50,
+        max_value=0.99,
+        value=0.90,
+        step=0.01,
+        key="replay_momentum",
+        help="Higher values adapt more smoothly; lower values follow distribution shifts more quickly.",
+    )
+    confidence_thresh = st.sidebar.slider(
+        "Confidence Threshold (τ)",
+        min_value=0.25,
+        max_value=0.95,
+        value=0.60,
+        step=0.05,
+        key="replay_confidence_threshold",
+        help="Minimum cosine softmax confidence required to update prototype positions.",
+    )
+    st.sidebar.markdown("#### Sleep Consolidation")
+    enable_consolidation = st.sidebar.checkbox(
+        "Enable Sleep Consolidation",
+        value=True,
+        key="replay_enable_consolidation",
+        help="Uses synthetic noisy feature snapshots around Session 1 prototypes.",
+    )
+    cons_interval = st.sidebar.number_input(
+        "Interval (steps)", min_value=10, max_value=100, value=25, step=5,
+        key="replay_consolidation_interval",
+    )
+    sleep_steps = st.sidebar.number_input(
+        "Correction Iterations", min_value=1, max_value=15, value=5,
+        key="replay_sleep_steps",
+    )
+    pull_rate = st.sidebar.slider(
+        "Pull Strength (λ)", min_value=0.1, max_value=1.0,
+        value=0.5, step=0.1, key="replay_pull_rate",
+    )
 
 else:
     momentum = 0.90
@@ -359,8 +387,37 @@ encoder_timesteps = None
 encoder_channels = None
 total_steps = 0
 requires_engine = requires_replay or active_page == "Model Diagnostics"
+if not requires_engine:
+    st.session_state["dashboard_engine_load_requested"] = False
+if active_page != "Cross-Subject Benchmarks":
+    st.session_state["dashboard_benchmarks_load_requested"] = False
+if active_page != "EEG Signal Analysis":
+    st.session_state["dashboard_signal_load_requested"] = False
+prepared_cache_dir = (
+    PROJECT_ROOT / "results" / "dashboard_cache"
+    / f"subject_{subject_id}_{ckpt_file.stem}_{projection_type.lower()}"
+)
+prepared_cache_exists = (prepared_cache_dir / "metadata.json").is_file()
+engine_load_requested = bool(
+    st.session_state.get("dashboard_engine_load_requested", False)
+)
 
 if requires_engine:
+    if not prepared_cache_exists and not engine_load_requested:
+        st.info(
+            "Replay data is not loaded yet. The first uncached load preprocesses "
+            "the selected subject's EEG and extracts SNN features."
+        )
+        if st.button(
+            "Load selected model and replay data",
+            type="primary",
+            use_container_width=True,
+            key="load_dashboard_engine",
+        ):
+            st.session_state["dashboard_engine_load_requested"] = True
+            st.rerun()
+        st.stop()
+
     if not ckpt_file.exists() or not proto_file.exists():
         st.sidebar.error(
             f"Checkpoint for Subject {subject_id} not found in results/checkpoints/"
@@ -372,18 +429,6 @@ if requires_engine:
             ckpt_file, map_location="cpu", weights_only=False
         )
 
-    prepared_cache_dir = (
-        PROJECT_ROOT / "results" / "dashboard_cache"
-        / f"subject_{subject_id}_{ckpt_file.stem}_{projection_type.lower()}"
-    )
-    if not (prepared_cache_dir / "metadata.json").is_file():
-        st.sidebar.info(
-            "No prepared feature cache exists for this selection. First load will "
-            "preprocess EEG and extract SNN features. To precompute once, run "
-            "`python scripts/precompute_dashboard_artifacts.py --subject "
-            + str(subject_id) + " --projection " + projection_type + "`."
-        )
-
     checkpoint_stat = ckpt_file.stat()
     prototype_stat = proto_file.stat()
     checkpoint_ref = file_sha256(
@@ -392,10 +437,28 @@ if requires_engine:
     prototypes_ref = file_sha256(
         str(proto_file), prototype_stat.st_mtime_ns, prototype_stat.st_size
     )
-    engine = load_engine(
-        str(ckpt_file), str(proto_file), subject_id, projection_type,
-        checkpoint_ref, prototypes_ref,
-    )
+    try:
+        engine = load_engine(
+            str(ckpt_file), str(proto_file), subject_id, projection_type,
+            checkpoint_ref, prototypes_ref,
+        )
+    except Exception as _engine_error:
+        st.error(
+            f"**Could not load Subject S{subject_id:02d} replay engine.** "
+            "This page requires the prepared feature cache. "
+            "Run this command once from the project root to precompute it:\n\n"
+            f"```\n"
+            f".\\FYP\\Scripts\\python.exe scripts/precompute_dashboard_artifacts.py "
+            f"--subject {subject_id} --projection {projection_type}\n"
+            "```\n\n"
+            f"Error detail: `{_engine_error}`"
+        )
+        st.info(
+            "**Tip:** The **Cross-Subject Benchmarks** and **Platform Guide** pages "
+            "do not require the feature cache and work immediately. "
+            "Select them from the sidebar navigator."
+        )
+        st.stop()
 
     if requires_replay:
         replay_identity = (
@@ -460,6 +523,7 @@ if requires_engine:
 def _format_activity(value: float | None) -> str:
     if value is None or not np.isfinite(value):
         return "N/A"
+    return f"{value:.1%}"
 
 # Views are selected with a sidebar navigator so inactive pages are not computed.
 
@@ -812,6 +876,20 @@ if active_page == "Offline Trial Replay":
 if active_page == "Cross-Subject Benchmarks":
     st.markdown("### 📊 Cross-Subject Experimental Results (Table 5)")
     st.caption("Metrics are loaded from hash-validated held-out evaluation artifacts; synthetic smoke-test outputs are not benchmark evidence.")
+    if not st.session_state.get("dashboard_benchmarks_load_requested", False):
+        st.info(
+            "Benchmark aggregation loads and validates checkpoint/artifact files "
+            "for all subjects. Start it when you are ready."
+        )
+        if st.button(
+            "Load cross-subject benchmark results",
+            type="primary",
+            use_container_width=True,
+            key="load_dashboard_benchmarks",
+        ):
+            st.session_state["dashboard_benchmarks_load_requested"] = True
+            st.rerun()
+        st.stop()
 
     table_data = []
     heatmap_records: list[dict[str, object]] = []
@@ -882,8 +960,8 @@ if active_page == "Cross-Subject Benchmarks":
         table_data.append({
             "Subject": f"Subject S{s:02d}",
             "Seeds": ", ".join(valid_seeds),
-            "Phase A Train": f"{np.mean([d.get('train_accuracy', 0) for d in checkpoint_data_rows]) * 100:.2f}%",
-            "Phase A Val": f"{np.mean([d.get('validation_accuracy', 0) for d in checkpoint_data_rows]) * 100:.2f}%",
+            "Phase A Train": f"{np.mean([d.get('train_accuracy', d.get('phase_a_train_acc', 0)) for d in checkpoint_data_rows]) * 100:.2f}%",
+            "Phase A Val": f"{np.mean([d.get('validation_accuracy', d.get('phase_a_val_acc', 0)) for d in checkpoint_data_rows]) * 100:.2f}%",
             "Static Target Baseline": summary("target_static_baseline_acc"),
             "Prequential Target Accuracy": summary("target_prequential_acc"),
             "Retrospective Diagnostic": summary("target_retrospective_acc"),
@@ -1343,6 +1421,20 @@ if active_page == "EEG Signal Analysis":
         "Inspect preprocessed BNCI2014-001 trial epochs. These are offline, "
         "zero-phase filtered and demeaned epochs—not live EEG and not raw continuous recordings."
     )
+    if not st.session_state.get("dashboard_signal_load_requested", False):
+        st.info(
+            "Loading EEG sessions may download or preprocess the selected subject. "
+            "Start it when you are ready."
+        )
+        if st.button(
+            "Load EEG signal data",
+            type="primary",
+            use_container_width=True,
+            key="load_dashboard_signal",
+        ):
+            st.session_state["dashboard_signal_load_requested"] = True
+            st.rerun()
+        st.stop()
     try:
         signal_sessions = load_signal_sessions(subject_id)
     except Exception as error:
