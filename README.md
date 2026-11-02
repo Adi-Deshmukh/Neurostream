@@ -231,3 +231,6 @@ The codebase includes an automated unit test suite covering all modules:
 - `test_sleep_consolidation.py`: Synthetic feature generation, cosine loss computation, and prototype anchor pulls.
 - `test_spike_encoder.py`: Rate and TTFS spike encoding, output sparsity bounds, and tensor dimensions.
 - `test_metrics.py`: Accuracy, adaptation gain, retention, forgetting, and forward-hook sparsity trackers.
+
+
+**Dataset storage:** raw MOABB/MNE downloads are local machine caches and are excluded from Git under `data/mne_data/`. If you previously relied on the repository-tracked copy, MOABB may need to download the BNCI2014-001 files again or be pointed at your existing local MNE data directory.
