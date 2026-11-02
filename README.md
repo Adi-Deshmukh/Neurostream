@@ -23,10 +23,22 @@ The project includes an interactive research dashboard built with Streamlit and 
 
 ### Launching the Dashboard
 
+Run these commands from the repository root (the folder containing `pyproject.toml`):
+
 ```powershell
-# From the project root, with the project virtual environment activated
+python -m pip install -e ".[dashboard]"
 python -m streamlit run dashboard/app.py
 ```
+
+Use the top-level `dashboard/app.py` launcher. Do **not** run
+`python -m streamlit run src/neurostream/dashboard/app.py`, and do not import
+`dashboard.simulation`. The Python package path is
+`neurostream.dashboard.simulation`. For example:
+
+```powershell
+python -c "from neurostream.dashboard.simulation import TrialReplayEngine; print('NeuroStream dashboard import OK')"
+```
+
 Then navigate to `http://localhost:8501` in your browser.
 
 ### Fast dashboard startup: precompute replay features once
