@@ -17,3 +17,9 @@ results/
 .pytest_cache/
 .mypy_cache/
 coverage.xml
+
+# Dashboard and local scientific-computing caches
+.cache/
+.mne/
+.streamlit/secrets.toml
+.streamlit/credentials.toml
