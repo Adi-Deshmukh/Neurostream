@@ -115,11 +115,11 @@ def discover_experiments(root: Path | None = None) -> list[dict[str, Any]]:
             resolved = checkpoint.resolve()
             if str(resolved) in referenced:
                 continue
-            match = re.search(r"phase_a_subject_(\\d+)\\.pt$", checkpoint.name)
+            match = re.search(r"phase_a_subject_(\d+)\.pt$", checkpoint.name)
             if not match:
                 continue
             subject = int(match.group(1))
-            seed_match = re.search(r"seed_(\\d+)", str(checkpoint.parent))
+            seed_match = re.search(r"seed_(\d+)", str(checkpoint.parent))
             seed = int(seed_match.group(1)) if seed_match else None
             key = (subject, seed if seed is not None else -1, str(resolved))
             discovered[key] = {
