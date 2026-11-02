@@ -5,6 +5,7 @@ trajectories, and online-style adaptation across all 9 subjects from checkpoints
 """
 
 from pathlib import Path
+import hashlib
 import json
 import numpy as np
 import pandas as pd
@@ -211,6 +212,18 @@ projection_type = st.sidebar.radio(
     help="Fixed 2D projection basis fitted on Session 1 features. Eliminates manifold jitter.",
 )
 
+prepared_cache_dir = (
+    PROJECT_ROOT / "results" / "dashboard_cache"
+    / f"subject_{subject_id}_{ckpt_file.stem}_{projection_type.lower()}"
+)
+if not (prepared_cache_dir / "metadata.json").is_file():
+    st.sidebar.info(
+        "No prepared feature cache exists for this selection. First load will "
+        "preprocess EEG and extract SNN features. To precompute once, run "
+        "`python scripts/precompute_dashboard_artifacts.py --subject "
+        + str(subject_id) + " --projection " + projection_type + "`."
+    )
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚡ Phase B Streaming Parameters")
 momentum = st.sidebar.slider(
@@ -244,8 +257,19 @@ pull_rate = st.sidebar.slider("Pull Strength (λ)", min_value=0.1, max_value=1.0
 
 # ── Load Replay Engine & Cache Simulation ────────────────────────────────────
 
-@st.cache_resource(show_spinner="Loading subject EEG trials and precomputing 2D manifold...")
+@st.cache_resource(show_spinner="Loading prepared replay features...")
 def load_engine(c_path: str, p_path: str, s_id: int, proj: str) -> TrialReplayEngine:
+    checkpoint_ref = hashlib.sha256(Path(c_path).read_bytes()).hexdigest()
+    artifact_dir = (
+        PROJECT_ROOT / "results" / "dashboard_cache"
+        / f"subject_{s_id}_{Path(c_path).stem}_{proj.lower()}"
+    )
+    if (artifact_dir / "metadata.json").is_file():
+        return TrialReplayEngine.from_prepared_artifact(
+            artifact_dir,
+            checkpoint_ref=checkpoint_ref,
+            subject=s_id,
+        )
     return TrialReplayEngine.from_checkpoint(
         checkpoint_path=c_path,
         prototypes_path=p_path,
