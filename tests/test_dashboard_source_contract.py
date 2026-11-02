@@ -135,3 +135,15 @@ def test_visual_analytics_workspace_contains_all_eight_requested_panels():
         assert title in source
     assert "No layer-level measurement is attached" in source
     assert "Only exact matched subject–seed pairs" in source
+
+
+def test_visual_analytics_uses_prepared_engine_measurements_and_baseline_features():
+    source = (
+        APP_PATH.parent / "visual_analytics.py"
+    ).read_text(encoding="utf-8")
+    assert 'st.session_state.get("ns_engine")' in source
+    assert "engine.measurement.layer_activity_fraction" in source
+    assert "Static baseline" in source
+    assert "engine.initial_prototypes_2d" in source
+    assert "Run paired replay: consolidation ON vs OFF" in source
+    assert "not a multi-seed statistical ablation" in source
