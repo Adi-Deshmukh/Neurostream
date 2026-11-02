@@ -41,50 +41,40 @@ python -c "from neurostream.dashboard.simulation import TrialReplayEngine; print
 
 Then navigate to `http://localhost:8501` in your browser.
 
-The dashboard includes these research views:
+The dashboard is an artifact-first research workstation with seven views:
 
-- **Offline Trial Replay:** precomputed trial-by-trial adaptation with safe trial navigation.
-- **EEG Signal Analysis:** preprocessed trial waveforms, power spectral density, and per-channel alpha/beta/gamma band-power heatmaps. EEG epochs are held in application memory for up to 15 minutes and are not written to the prepared feature cache.
-- **Model Diagnostics:** static Session 2 confusion matrix, class-wise accuracy, prototype cosine similarity, feature-centroid alignment, and feature-norm distributions.
-- **Cross-Subject Benchmarks:** metrics from validated evaluation artifacts.
-- **Measured Spike Activity:** measured activity fractions and paired consolidation ON/OFF replay diagnostics.
-- **Platform Guide:** model and experimental protocol notes.
+- **Overview:** selected experiment metrics, subject-wise comparisons, recent validated runs and checkpoint provenance.
+- **Signal Analysis:** explicit, on-demand loading of preprocessed EEG epochs; channel/trial/window selection, session comparison, band-power heatmaps and epoch quality checks. It does not label preprocessed epochs as raw EEG.
+- **Model Diagnostics:** model architecture, validated confusion matrix, measured layer activity when present in a matching prepared cache, and feature-space distributions loaded only on request.
+- **Adaptation Replay:** offline trial-by-trial replay from feature-only prepared artifacts. Settings are applied once; the trial slider and jump controls only navigate stored replay output.
+- **Benchmark Lab:** subject × seed heatmaps, metric comparisons, per-subject variability and confusion matrices from validated evaluation artifacts.
+- **Consolidation Study:** paired ON/OFF analysis joined on exact subject and seed, with paired differences and uncertainty intervals. No conclusion is shown when a paired report is absent.
+- **Experiment Registry:** manifest entries, checkpoint/evaluation validation status, hashes, run metadata and prepared-cache inventory.
 
-Replay parameter sliders are grouped in a form: change the values and click **Apply replay settings** to run the selected configuration. The trial-position slider and Jump to Start/End buttons navigate the already-computed replay without rerunning the model.
+The overview, benchmark and registry views do not instantiate the SNN, load EEG, deserialize checkpoints, fit projections, or execute replay. The registry reads local JSON manifests and validates evaluation artifacts against the SHA-256 of the referenced checkpoint. Missing, stale, malformed or mismatched artifacts are reported as unavailable rather than represented as zero.
 
-### Fast dashboard startup: precompute replay features once
+### Dashboard launch
 
-The first dashboard load for a subject/projection may load BNCI2014-001, apply the
-checkpoint's encoder, run the frozen SNN, fit the 2D projection, and measure spike
-activity. To move this expensive preparation out of normal dashboard startup, run
-the one-time preparation command from the repository root:
+From the repository root:
 
 ```powershell
-python scripts/precompute_dashboard_artifacts.py --subject 1 --projection PCA
+python -m pip install -e ".[dashboard]"
+python -m streamlit run dashboard/app.py
 ```
 
-Repeat for the subjects and projections you plan to inspect. For example:
+Use the top-level `dashboard/app.py` launcher. Do not launch `src/neurostream/dashboard/app.py` directly.
+
+### Prepare replay features once
+
+Replay requires a feature-only prepared artifact matching the selected checkpoint and prototype files. For a run in a sweep directory, pass the exact checkpoint and prototype paths:
 
 ```powershell
-1..9 | ForEach-Object {
-    python scripts/precompute_dashboard_artifacts.py --subject $_ --projection PCA
-}
+python scripts/precompute_dashboard_artifacts.py --subject 1 --checkpoint "results/checkpoints/sweep/sub_1/seed_42/phase_a_subject_1.pt" --prototypes "results/checkpoints/sweep/sub_1/seed_42/prototypes_subject_1.pt" --projection PCA
 ```
 
-The command writes to `results/dashboard_cache/`. The dashboard automatically
-uses a prepared cache only when its subject and checkpoint SHA-256 match the
-currently selected checkpoint. If no cache exists, it falls back to the original
-on-demand preparation path and shows the command needed to generate the cache.
+The output is written under `results/dashboard_cache/`. The app loads it only when subject, checkpoint SHA-256 and prototype SHA-256 match. If it is absent or rejected, the replay page shows the required preparation command; it does not silently run EEG preprocessing or SNN feature extraction on page navigation.
 
-The dashboard uses a sidebar research-view navigator rather than eager tabs.
-Only the selected view is computed: the replay engine is not initialized when
-viewing the benchmark table or platform guide, and the nine-subject benchmark
-loop does not run while inspecting the replay page.
-
-**Storage contract:** the prepared cache stores SNN feature matrices, labels,
-prototypes, projection state, measured activity, and provenance. It deliberately
-does not store raw EEG epochs or encoded spike tensors. The cache is local,
-regenerable, and ignored by Git under the existing `results/` ignore rule.
+The preparation command stores feature matrices, labels, prototypes, projection coordinates/state, measured spike activity and provenance. It does not store raw EEG epochs or encoded spike tensors. Signal Analysis is a separate explicit operation that loads the dataset into the current Streamlit session.
 
 ### Preprocessing and calibration contract
 
