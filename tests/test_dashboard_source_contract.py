@@ -51,19 +51,15 @@ def test_replay_uses_prepared_artifacts_and_explicit_submit():
     assert "engine.run_replay(" in source
 
 
-def test_chart_width_arguments_remain_compatible_with_streamlit_baseline():
-    tree = source_tree()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-            continue
-        if node.func.attr not in {"plotly_chart", "dataframe"}:
-            continue
-        for keyword in node.keywords:
-            assert not (
-                keyword.arg == "width"
-                and isinstance(keyword.value, ast.Constant)
-                and keyword.value.value == "stretch"
-            )
+def test_chart_sizing_adapts_to_installed_streamlit_api():
+    source = APP_PATH.read_text(encoding="utf-8")
+    assert '"width" in inspect.signature(st.plotly_chart).parameters' in source
+    assert '"width" in inspect.signature(st.dataframe).parameters' in source
+    assert 'width="stretch"' in source
+    assert "use_container_width=True" in source
+    # All page-level rendering goes through the two compatibility wrappers.
+    assert source.count("st.plotly_chart(") == 2
+    assert source.count("st.dataframe(") == 2
 
 
 def test_all_dashboard_pages_render_without_experiment_artifacts():
