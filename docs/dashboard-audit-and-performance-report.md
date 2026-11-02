@@ -96,11 +96,19 @@ Added/updated tests:
 - `tests/test_dashboard_registry.py`: missing-checkpoint handling, exact
   subject/seed pairing and repository-root resolution.
 
-**Not verified in this environment:** full pytest suite, Streamlit process startup,
-real dataset download/cache, actual checkpoint/cache load, all browser interactions,
-browser console, multi-user isolation and performance timings. Run the commands
-below after pulling the commits. Do not treat source inspection as proof of a
-successful browser session.
+**Verified by GitHub Actions:** at commit `5ceb8e1`, the complete suite
+reported **109 passed, 5 warnings**; Python source compilation and the dashboard
+dependency smoke test also passed. The suite includes Streamlit AppTest navigation
+through all seven pages and a synthetic-epoch Signal Analysis chart/band-power
+render. The warnings were dependency/runtime warnings, not test failures.
+
+**Still not verified here:** launching a long-running Streamlit server in the
+user's Windows environment, loading the user's actual MOABB dataset/checkpoints/
+prepared replay cache, scrubbing replay against their real experiment artifacts,
+browser-console behavior, multi-user load and performance timings. AppTest uses
+synthetic epochs for the signal chart; it does not prove a real MOABB download or
+a real replay artifact works. Do not treat CI as a substitute for that local
+data-backed walkthrough.
 
 ## Local verification commands
 
