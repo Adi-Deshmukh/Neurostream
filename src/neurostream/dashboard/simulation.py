@@ -374,6 +374,28 @@ class TrialReplayEngine:
             raise ValueError("prepared Session 2 labels do not match feature rows")
         if instance.static_preds.size != instance.s2_labels.size:
             raise ValueError("prepared static predictions do not match Session 2 labels")
+        if instance.s1_features.shape[0] == 0 or instance.s2_features.shape[0] == 0:
+            raise ValueError("prepared feature matrices must not be empty")
+        if not all(np.isfinite(value).all() for value in (
+            instance.s1_features, instance.s2_features,
+            instance.initial_prototypes.numpy(), instance.s1_features_2d,
+            instance.s2_features_2d, instance.initial_prototypes_2d,
+        )):
+            raise ValueError("prepared replay arrays must contain only finite values")
+        n_classes = instance.initial_prototypes.shape[0]
+        if len(metadata.get("class_names", [])) != n_classes:
+            raise ValueError("prepared class names do not match prototype count")
+        if instance.initial_prototypes.shape[1] != instance.s1_features.shape[1]:
+            raise ValueError("prepared prototype and feature dimensions do not match")
+        if instance.s1_features_2d.shape != (instance.s1_labels.size, 2):
+            raise ValueError("prepared Session 1 projection shape is invalid")
+        if instance.s2_features_2d.shape != (instance.s2_labels.size, 2):
+            raise ValueError("prepared Session 2 projection shape is invalid")
+        if instance.initial_prototypes_2d.shape != (n_classes, 2):
+            raise ValueError("prepared prototype projection shape is invalid")
+        for labels in (instance.s1_labels, instance.s2_labels, instance.static_preds):
+            if labels.size and (labels.min() < 0 or labels.max() >= n_classes):
+                raise ValueError("prepared labels are outside the class range")
 
         instance.subject = int(subject)
         instance.checkpoint_ref = checkpoint_ref
