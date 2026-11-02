@@ -12,6 +12,9 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import torch
+
+from neurostream.models.prototype_memory import PrototypeMemory
 
 
 COLORS = ("#3976A8", "#269B83", "#D39A45", "#8B79B8")
@@ -44,6 +47,8 @@ def render_visual_analytics(
     )
 
     run = selected_run or (valid_runs[0] if valid_runs else None)
+    engine = st.session_state.get("ns_engine")
+    replay = st.session_state.get("ns_replay")
     if run:
         st.caption(
             f"Selected experiment: S{run['subject']:02d} · seed {run['seed']} · "
@@ -157,85 +162,137 @@ def render_visual_analytics(
 
     # 5. Prototype movement and drift.
     st.markdown("### 5 · Prototype movement and drift")
-    replay = st.session_state.get("ns_replay")
-    if replay is not None and replay.steps:
-        positions = np.asarray(replay.prototype_history_2d, dtype=float)
-        if positions.ndim == 3 and positions.shape[0] >= len(replay.steps):
+    if engine is not None:
+        if replay is not None and replay.steps:
+            positions = np.asarray(replay.prototype_history_2d, dtype=float)
             fig = go.Figure()
-            for index, name in enumerate(replay.class_names):
-                fig.add_trace(go.Scatter(x=positions[:, index, 0], y=positions[:, index, 1],
-                                         mode="lines+markers", marker=dict(size=3),
-                                         name=f"{name} prototype"))
-            fig.update_layout(title="Prototype trajectories in the fixed 2D reference projection",
-                              xaxis_title="Projection dimension 1", yaxis_title="Projection dimension 2", height=420)
+            if positions.ndim == 3 and positions.shape[0] == len(replay.steps):
+                for index, name in enumerate(replay.class_names):
+                    fig.add_trace(go.Scatter(
+                        x=positions[:, index, 0], y=positions[:, index, 1],
+                        mode="lines", name=f"{name} trajectory",
+                    ))
+            else:
+                st.warning("Replay prototype history is malformed; showing the prepared starting state instead.")
+            initial = np.asarray(engine.initial_prototypes_2d, dtype=float)
+            for index, name in enumerate(engine.class_names):
+                fig.add_trace(go.Scatter(
+                    x=[initial[index, 0]], y=[initial[index, 1]],
+                    mode="markers", marker=dict(symbol="x", size=13),
+                    name=f"{name} initial",
+                ))
+            fig.update_layout(
+                title="Prototype trajectories in the fixed Session 1 projection",
+                xaxis_title="Projection dimension 1", yaxis_title="Projection dimension 2",
+                height=420,
+            )
             _chart(fig, render_plotly)
-        drift = [float(step.drift_loss) for step in replay.steps]
-        drift_fig = go.Figure(go.Scatter(x=np.arange(1, len(drift) + 1), y=drift, mode="lines",
-                                         name="Recorded consolidation drift"))
-        drift_fig.update_layout(title="Recorded consolidation drift diagnostic", xaxis_title="Target trial",
-                                yaxis_title="Drift loss (recorded at consolidation trigger)", height=300)
-        _chart(drift_fig, render_plotly)
-        st.caption("Prototype movement is shown in the fixed 2D projection. The current replay schema does not retain full-dimensional per-trial prototype snapshots.")
+            drift = [float(step.drift_loss) for step in replay.steps]
+            drift_fig = go.Figure(go.Scatter(
+                x=np.arange(1, len(drift) + 1), y=drift, mode="lines",
+                name="Consolidation drift",
+            ))
+            drift_fig.update_layout(
+                title="Recorded consolidation drift diagnostic",
+                xaxis_title="Target trial",
+                yaxis_title="Drift loss (zero when no consolidation event)", height=300,
+            )
+            _chart(drift_fig, render_plotly)
+            st.caption("Prototype paths are projected into the fixed Session 1 reference space. Drift values are recorded only when consolidation triggers; zero elsewhere means no trigger, not zero measured drift.")
+        else:
+            initial = np.asarray(engine.initial_prototypes_2d, dtype=float)
+            fig = go.Figure()
+            for index, name in enumerate(engine.class_names):
+                fig.add_trace(go.Scatter(
+                    x=[initial[index, 0]], y=[initial[index, 1]],
+                    mode="markers+text", text=[name], textposition="top center",
+                    marker=dict(size=14, symbol="x"), name=f"{name} initial prototype",
+                ))
+            fig.update_layout(
+                title="Initial prototype positions · before target adaptation",
+                xaxis_title="Projection dimension 1", yaxis_title="Projection dimension 2",
+                height=380,
+            )
+            _chart(fig, render_plotly)
+            st.info("This is the prepared starting state, not prototype movement. Run the offline replay to generate trajectories and consolidation drift.")
     else:
-        st.info("Run an offline replay on the Adaptation Replay page. This panel reads the stored replay result; it does not run inference.")
+        st.info("Load the prepared features on Adaptation Replay. The starting prototype positions can be plotted before running adaptation.")
 
     # 6. Confidence distribution.
     st.markdown("### 6 · Confidence distribution")
-    if replay is not None and replay.steps:
-        confidences = np.asarray([step.confidence for step in replay.steps], dtype=float)
-        confidence_fig = go.Figure(go.Histogram(x=confidences, nbinsx=20, name="Prediction confidence"))
-        confidence_fig.update_layout(title="Prediction confidence across target trials",
-                                     xaxis_title="Confidence", yaxis_title="Trial count", height=330)
+    if engine is not None:
+        memory = PrototypeMemory(engine.initial_prototypes.clone(), momentum=0.9999)
+        _, baseline_confidence = memory.predict(
+            torch.as_tensor(engine.s2_features, dtype=torch.float32), temperature=0.1
+        )
+        baseline_values = baseline_confidence.detach().cpu().numpy().reshape(-1)
+        confidence_fig = go.Figure()
+        confidence_fig.add_trace(go.Histogram(
+            x=baseline_values, nbinsx=20, name="Static baseline",
+            opacity=0.65,
+        ))
+        if replay is not None and replay.steps:
+            replay_values = np.asarray([step.confidence for step in replay.steps], dtype=float)
+            confidence_fig.add_trace(go.Histogram(
+                x=replay_values, nbinsx=20, name="Adaptation replay",
+                opacity=0.65,
+            ))
+        confidence_fig.update_layout(
+            title="Prediction confidence distribution",
+            xaxis_title="Prototype prediction confidence", yaxis_title="Trial count",
+            barmode="overlay", height=350,
+        )
         _chart(confidence_fig, render_plotly)
-        st.caption("Confidence values are the replay engine's recorded prediction confidences, not calibrated probabilities unless calibration was separately established.")
+        st.caption("Static baseline confidence is computed from prepared Session 2 features and initial prototypes. Replay confidence is added after adaptation. These are model scores, not calibrated probabilities.")
     else:
-        st.info("Run an offline replay to populate confidence scores.")
+        st.info("Load prepared features on Adaptation Replay to calculate the static baseline confidence distribution. Adapted confidence is added after replay.")
 
     # 7. Spike activity by layer.
     st.markdown("### 7 · Spike activity by layer")
-    layer_values = {}
-    measurement_source = None
-    if run:
-        layer_values = run.get("artifact", {}).get("layer_activity_fraction") or run.get("run_config", {}).get("layer_activity_fraction") or {}
+    measurement = getattr(engine, "measurement", None) if engine is not None else None
+    layer_values = (
+        measurement.layer_activity_fraction
+        if measurement is not None else {}
+    )
+    measurement_source = "measurement persisted in the loaded, checkpoint-matched prepared replay cache"
+    if not layer_values and run:
+        layer_values = (
+            run.get("artifact", {}).get("layer_activity_fraction")
+            or run.get("run_config", {}).get("layer_activity_fraction")
+            or {}
+        )
         if layer_values:
             measurement_source = "validated evaluation artifact"
-        else:
-            cache_root = root / "results" / "dashboard_cache"
-            for metadata_path in cache_root.glob("*/metadata.json") if cache_root.exists() else []:
-                try:
-                    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-                    measurement = metadata.get("measurement", {})
-                    if metadata.get("checkpoint_ref") == run["artifact"].get("checkpoint_sha256") and int(metadata.get("subject", -1)) == int(run["subject"]):
-                        candidate = measurement.get("layer_activity_fraction", {})
-                        if candidate:
-                            layer_values = candidate
-                            measurement_source = "checkpoint-matched prepared replay measurement"
-                            break
-                except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                    continue
     if isinstance(layer_values, dict) and layer_values:
         names = list(layer_values)
         vals = [float(layer_values[name]) for name in names]
         if all(np.isfinite(value) and 0 <= value <= 1 for value in vals):
-            fig = go.Figure(go.Bar(x=names, y=vals, text=[f"{value:.1%}" for value in vals],
-                                   textposition="outside"))
-            fig.update_layout(title="Measured activity fraction by instrumented layer",
-                              xaxis_title="SNN layer", yaxis_title="Fraction of spike opportunities",
-                              yaxis_range=[0, max(1.0, max(vals) * 1.15)], height=340)
+            fig = go.Figure(go.Bar(
+                x=names, y=vals, text=[f"{value:.1%}" for value in vals],
+                textposition="outside",
+            ))
+            fig.update_layout(
+                title="Measured activity fraction by instrumented LIF layer",
+                xaxis_title="SNN layer",
+                yaxis_title="Fraction of spike opportunities",
+                yaxis_range=[0, max(1.0, max(vals) * 1.15)], height=340,
+            )
             _chart(fig, render_plotly)
             st.caption(f"Source: {measurement_source}. Activity is a fraction of spike opportunities, not power or energy.")
         else:
             st.warning("Layer activity metadata failed validation and is not plotted.")
     else:
-        st.info("No layer-level measurement is attached to the selected checkpoint. Re-run the instrumented spike-activity measurement to populate this chart; aggregate spike sparsity cannot be split into layers after the fact.")
+        st.info("Load the prepared feature cache for this checkpoint. The precompute step already records per-layer spike activity; no separate measurement run should be needed.")
 
     # 8. Consolidation ablation comparison.
     st.markdown("### 8 · Consolidation ablation comparison")
     reports = discover_ablation_reports(root)
     if reports:
-        report_item = st.selectbox("Paired ablation report", reports,
-                                   format_func=lambda item: str(item["path"].relative_to(root)),
-                                   key="va_ablation_report")
+        report_item = st.selectbox(
+            "Paired ablation report", reports,
+            format_func=lambda item: str(item["path"].relative_to(root)),
+            key="va_ablation_report",
+        )
         paired = paired_ablation_rows(report_item["payload"])
         if paired:
             frame = pd.DataFrame(paired)
@@ -251,18 +308,27 @@ def render_visual_analytics(
             on = pd.to_numeric(frame[f"{key}_enabled"], errors="coerce")
             off = pd.to_numeric(frame[f"{key}_disabled"], errors="coerce")
             valid_mask = on.notna() & off.notna()
-            compare = pd.DataFrame({"Subject": frame.loc[valid_mask, "subject"].astype(str),
-                                    "Seed": frame.loc[valid_mask, "seed"].astype(str),
-                                    "Consolidation ON": on[valid_mask].to_numpy(),
-                                    "Consolidation OFF": off[valid_mask].to_numpy()})
+            compare = pd.DataFrame({
+                "Subject": frame.loc[valid_mask, "subject"].astype(str),
+                "Seed": frame.loc[valid_mask, "seed"].astype(str),
+                "Consolidation ON": on[valid_mask].to_numpy(),
+                "Consolidation OFF": off[valid_mask].to_numpy(),
+            })
             if not compare.empty:
                 fig = go.Figure()
-                fig.add_trace(go.Bar(x=compare["Subject"] + " / " + compare["Seed"],
-                                     y=compare["Consolidation ON"], name="Consolidation ON"))
-                fig.add_trace(go.Bar(x=compare["Subject"] + " / " + compare["Seed"],
-                                     y=compare["Consolidation OFF"], name="Consolidation OFF"))
-                fig.update_layout(title=f"Paired ablation · {label}", barmode="group",
-                                  xaxis_title="Matched subject / seed", yaxis_title="Metric", height=380)
+                fig.add_trace(go.Bar(
+                    x=compare["Subject"] + " / " + compare["Seed"],
+                    y=compare["Consolidation ON"], name="Consolidation ON",
+                ))
+                fig.add_trace(go.Bar(
+                    x=compare["Subject"] + " / " + compare["Seed"],
+                    y=compare["Consolidation OFF"], name="Consolidation OFF",
+                ))
+                fig.update_layout(
+                    title=f"Paired experiment ablation · {label}",
+                    barmode="group", xaxis_title="Matched subject / seed",
+                    yaxis_title="Metric", height=380,
+                )
                 _chart(fig, render_plotly)
                 st.caption(f"Only exact matched subject–seed pairs are included (n={len(compare)}).")
             else:
@@ -270,4 +336,46 @@ def render_visual_analytics(
         else:
             st.warning("This report contains no exact matched ON/OFF subject–seed pairs.")
     else:
-        st.info("No paired consolidation ablation report found. Run the paired ON/OFF experiment before interpreting consolidation effects.")
+        st.info("No multi-run paired ablation report exists yet. You can run a single-checkpoint paired replay below for an exploratory comparison; it is not a substitute for the multi-subject experiment.")
+        if engine is not None:
+            if st.button("Run paired replay: consolidation ON vs OFF", key="va_run_paired_replay"):
+                try:
+                    with st.spinner("Running two feature-only replay simulations..."):
+                        enabled = engine.run_replay(enable_consolidation=True)
+                        disabled = engine.run_replay(enable_consolidation=False)
+                    st.session_state["ns_replay_ablation"] = {
+                        "enabled": enabled,
+                        "disabled": disabled,
+                        "subject": engine.subject,
+                        "run_id": engine.run_id,
+                    }
+                except Exception as error:
+                    st.error("Paired replay comparison failed.")
+                    st.exception(error)
+            paired_replay = st.session_state.get("ns_replay_ablation")
+            if paired_replay and paired_replay.get("run_id") == engine.run_id:
+                enabled = paired_replay["enabled"]
+                disabled = paired_replay["disabled"]
+                metrics = ["Target prequential accuracy", "Session 1 retention", "Acceptance rate"]
+                on_values = [
+                    enabled.adapted_target_accuracy,
+                    enabled.session1_retention_accuracy,
+                    float(np.mean([step.accepted for step in enabled.steps])),
+                ]
+                off_values = [
+                    disabled.adapted_target_accuracy,
+                    disabled.session1_retention_accuracy,
+                    float(np.mean([step.accepted for step in disabled.steps])),
+                ]
+                fig = go.Figure()
+                fig.add_trace(go.Bar(x=metrics, y=on_values, name="Consolidation ON"))
+                fig.add_trace(go.Bar(x=metrics, y=off_values, name="Consolidation OFF"))
+                fig.update_layout(
+                    title=f"Exploratory paired replay · Subject {engine.subject}",
+                    barmode="group", yaxis_title="Score / rate", yaxis_range=[0, 1],
+                    height=380,
+                )
+                _chart(fig, render_plotly)
+                st.caption("Same prepared features, checkpoint and default replay settings; only consolidation is toggled. This is one exploratory replay pair, not a multi-seed statistical ablation.")
+        else:
+            st.info("Load prepared features on Adaptation Replay to run this exploratory paired comparison.")
