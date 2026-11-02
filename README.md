@@ -24,13 +24,8 @@ The project includes an interactive research dashboard built with Streamlit and 
 ### Launching the Dashboard
 
 ```powershell
-# From the project root
-& ".\FYP\Scripts\python.exe" -m streamlit run dashboard/app.py
-```
-
-Or if your virtual environment is activated:
-```bash
-streamlit run dashboard/app.py
+# From the project root, with the project virtual environment activated
+python -m streamlit run dashboard/app.py
 ```
 Then navigate to `http://localhost:8501` in your browser.
 
