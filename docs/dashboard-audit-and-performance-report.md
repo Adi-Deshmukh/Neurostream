@@ -104,26 +104,23 @@ Added/updated tests:
 - `tests/test_dashboard_registry.py`: missing-checkpoint handling, exact
   subject/seed pairing and repository-root resolution.
 
-**Verified by GitHub Actions:** at commit `1374daf`, the complete suite
-reported **110 passed, 2 warnings**; Python source compilation and the dashboard
+**Verified by GitHub Actions:** at commit `92e4b86`, the complete suite
+reported **111 passed, 2 warnings**; Python source compilation and the dashboard
 dependency smoke test also passed. The suite includes Streamlit AppTest navigation
-through all seven pages and a synthetic-epoch Signal Analysis chart/band-power
-render. The NumPy `trapz` and Streamlit chart-sizing deprecation warnings were
-removed in that snapshot. The remaining warnings were dependency/runtime warnings.
-
-**Latest changes after that passing snapshot:** hash-scoped replay-cache paths,
-checkpoint-mutation rejection and their source-contract test were pushed after
-`1374daf`; their GitHub Actions runs are still in progress. They are not claimed
-as CI-verified yet.
+through all seven pages and a synthetic-epoch Signal Analysis waveform, session
+comparison, quality-check and band-power render. It also covers checkpoint hash
+validation, legacy NumPy normalization metadata, orphan checkpoints, paired
+ablation joins and hash-scoped replay-cache identity. The NumPy `trapz` and
+Streamlit chart-sizing deprecation warnings were removed. The remaining warnings
+are dependency/runtime warnings.
 
 **Still not verified here:** launching a long-running Streamlit server in the
 user's Windows environment, loading the user's actual MOABB dataset/checkpoints/
 prepared replay cache, scrubbing replay against their real experiment artifacts,
 browser-console behavior, multi-user load and performance timings. AppTest uses
-synthetic epochs for the signal chart; it does not prove a real MOABB download or
+synthetic epochs for signal rendering; it does not prove a real MOABB download or
 a real replay artifact works. Do not treat CI as a substitute for that local
 data-backed walkthrough.
-
 ## Local verification commands
 
 ```powershell
