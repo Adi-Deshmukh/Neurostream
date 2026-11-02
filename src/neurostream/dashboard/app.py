@@ -206,6 +206,13 @@ elif page == "Signal Analysis":
         time = np.arange(a, b) / data.sfreq
         signal = data.X[trial, channel, a:b]
         fig = go.Figure(go.Scatter(x=time, y=signal, mode="lines", line=dict(color="#3976A8", width=1.2), name=channel_names[channel]))
+        if data.epoch_reference == "trial_start":
+            cue_time = 2.0 - data.tmin
+            if start_s <= cue_time <= end_s:
+                fig.add_vline(
+                    x=cue_time, line_dash="dash", line_color="#D39A45",
+                    annotation_text="Imagery cue onset",
+                )
         fig.update_layout(title=f"{session_name} · trial {trial+1} · {channel_names[channel]}",
                           xaxis_title="Time (s) from epoch start", yaxis_title="Amplitude (preprocessed units)", height=380)
         st.plotly_chart(fig, use_container_width=True)
