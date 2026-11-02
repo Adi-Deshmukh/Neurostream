@@ -451,8 +451,10 @@ if active_page == "Offline Trial Replay":
     ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2.4, 1.0, 1.0])
     slider_key = trial_slider_key(subject_id, projection_type, engine.checkpoint_ref)
 
-    # Clamp any state left over from a previous run before creating the widget.
-    if slider_key in st.session_state:
+    # Initialize/clamp the widget state before Streamlit creates the slider.
+    if slider_key not in st.session_state:
+        st.session_state[slider_key] = 1
+    else:
         st.session_state[slider_key] = min(
             max(int(st.session_state[slider_key]), 1), total_steps
         )
@@ -474,7 +476,6 @@ if active_page == "Offline Trial Replay":
             "Streaming Replay Position (Trial Index)",
             min_value=1,
             max_value=total_steps,
-            value=min(max(int(st.session_state.get(slider_key, 1)), 1), total_steps),
             key=slider_key,
             help="Move through the precomputed replay. This changes the displayed trial, not the underlying model run.",
         )
