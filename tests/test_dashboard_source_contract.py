@@ -67,7 +67,7 @@ def test_replay_cache_identity_includes_checkpoint_and_prototype_hashes():
     prepare_source = (
         APP_PATH.parents[3] / "scripts" / "precompute_dashboard_artifacts.py"
     ).read_text(encoding="utf-8")
-    assert 'run["artifact"]["checkpoint_sha256"][:12]' in source
+    assert "run['artifact']['checkpoint_sha256'][:12]" in source
     assert "prototype_hash[:12]" in source
     assert "cache_signature" in source
     assert "checkpoint_hash[:12]" in prepare_source
