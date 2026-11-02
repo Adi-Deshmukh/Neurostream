@@ -27,7 +27,7 @@ def test_navigation_contains_all_research_workspaces():
     for page in (
         "Overview", "Signal Analysis", "Model Diagnostics",
         "Adaptation Replay", "Benchmark Lab", "Consolidation Study",
-        "Experiment Registry",
+        "Experiment Registry", "Visual Analytics",
     ):
         assert f'"{page}"' in source
 
@@ -89,7 +89,7 @@ def test_actual_streamlit_entrypoint_navigation_reruns_all_pages():
     page_names = (
         "Signal Analysis", "Model Diagnostics", "Adaptation Replay",
         "Benchmark Lab", "Consolidation Study", "Experiment Registry",
-        "Overview",
+        "Visual Analytics", "Overview",
     )
     for page_name in page_names:
         app.sidebar.radio[0].set_value(page_name).run()
@@ -116,3 +116,22 @@ def test_actual_streamlit_entrypoint_navigation_reruns_all_pages():
     )
     power_button.click().run()
     assert not app.exception, "Signal band-power visualization failed to render"
+
+
+def test_visual_analytics_workspace_contains_all_eight_requested_panels():
+    source = (
+        APP_PATH.parent / "visual_analytics.py"
+    ).read_text(encoding="utf-8")
+    for title in (
+        "1 · EEG signal viewer",
+        "2 · EEG frequency-band heatmap",
+        "3 · Confusion matrix",
+        "4 · Subject × seed accuracy heatmap",
+        "5 · Prototype movement and drift",
+        "6 · Confidence distribution",
+        "7 · Spike activity by layer",
+        "8 · Consolidation ablation comparison",
+    ):
+        assert title in source
+    assert "No layer-level measurement is attached" in source
+    assert "Only exact matched subject–seed pairs" in source
