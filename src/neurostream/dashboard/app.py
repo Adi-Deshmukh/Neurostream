@@ -250,6 +250,12 @@ sleep_steps = st.sidebar.number_input("Correction Iterations", min_value=1, max_
 pull_rate = st.sidebar.slider("Pull Strength (λ)", min_value=0.1, max_value=1.0, value=0.5, step=0.1)
 
 
+@st.cache_data(show_spinner=False)
+def file_sha256(path: str, modified_ns: int, file_size: int) -> str:
+    """Hash a model artifact once per file version, not on every widget rerun."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
 @st.cache_resource(show_spinner="Loading prepared replay features...")
 def load_engine(
     c_path: str,
@@ -336,8 +342,14 @@ if requires_replay:
             + str(subject_id) + " --projection " + projection_type + "`."
         )
 
-    checkpoint_ref = hashlib.sha256(ckpt_file.read_bytes()).hexdigest()
-    prototypes_ref = hashlib.sha256(proto_file.read_bytes()).hexdigest()
+    checkpoint_stat = ckpt_file.stat()
+    prototype_stat = proto_file.stat()
+    checkpoint_ref = file_sha256(
+        str(ckpt_file), checkpoint_stat.st_mtime_ns, checkpoint_stat.st_size
+    )
+    prototypes_ref = file_sha256(
+        str(proto_file), prototype_stat.st_mtime_ns, prototype_stat.st_size
+    )
     engine = load_engine(
         str(ckpt_file), str(proto_file), subject_id, projection_type,
         checkpoint_ref, prototypes_ref,
