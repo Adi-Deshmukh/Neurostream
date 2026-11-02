@@ -34,6 +34,35 @@ streamlit run dashboard/app.py
 ```
 Then navigate to `http://localhost:8501` in your browser.
 
+### Fast dashboard startup: precompute replay features once
+
+The first dashboard load for a subject/projection may load BNCI2014-001, apply the
+checkpoint's encoder, run the frozen SNN, fit the 2D projection, and measure spike
+activity. To move this expensive preparation out of normal dashboard startup, run
+the one-time preparation command from the repository root:
+
+```powershell
+python scripts/precompute_dashboard_artifacts.py --subject 1 --projection PCA
+```
+
+Repeat for the subjects and projections you plan to inspect. For example:
+
+```powershell
+1..9 | ForEach-Object {
+    python scripts/precompute_dashboard_artifacts.py --subject $_ --projection PCA
+}
+```
+
+The command writes to `results/dashboard_cache/`. The dashboard automatically
+uses a prepared cache only when its subject and checkpoint SHA-256 match the
+currently selected checkpoint. If no cache exists, it falls back to the original
+on-demand preparation path and shows the command needed to generate the cache.
+
+**Storage contract:** the prepared cache stores SNN feature matrices, labels,
+prototypes, projection state, measured activity, and provenance. It deliberately
+does not store raw EEG epochs or encoded spike tensors. The cache is local,
+regenerable, and ignored by Git under the existing `results/` ignore rule.
+
 ### Preprocessing and calibration contract
 
 The current pipeline is **offline and epoch-based**. Preprocessing uses a
