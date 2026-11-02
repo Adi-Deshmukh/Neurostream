@@ -265,11 +265,17 @@ def load_engine(c_path: str, p_path: str, s_id: int, proj: str) -> TrialReplayEn
         / f"subject_{s_id}_{Path(c_path).stem}_{proj.lower()}"
     )
     if (artifact_dir / "metadata.json").is_file():
-        return TrialReplayEngine.from_prepared_artifact(
-            artifact_dir,
-            checkpoint_ref=checkpoint_ref,
-            subject=s_id,
-        )
+        try:
+            return TrialReplayEngine.from_prepared_artifact(
+                artifact_dir,
+                checkpoint_ref=checkpoint_ref,
+                subject=s_id,
+            )
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
+            st.warning(
+                f"Prepared replay cache was rejected ({error}). "
+                "Rebuilding from the source checkpoint and dataset."
+            )
     return TrialReplayEngine.from_checkpoint(
         checkpoint_path=c_path,
         prototypes_path=p_path,
