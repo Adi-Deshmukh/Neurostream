@@ -57,6 +57,13 @@ def test_replay_simulation_execution(mock_replay_engine):
     assert len(sim.steps) == 50
     assert sim.session1_features_2d.shape == (40, 2)
     assert sim.session2_features_2d.shape == (50, 2)
+    assert sim.prototype_history_2d.shape == (50, 4, 2)
+    np.testing.assert_allclose(
+        sim.prototype_history_2d[0], sim.steps[0].prototypes_2d
+    )
+    np.testing.assert_allclose(
+        sim.prototype_history_2d[-1], sim.steps[-1].prototypes_2d
+    )
 
     # Verify step progression
     for i, step in enumerate(sim.steps):

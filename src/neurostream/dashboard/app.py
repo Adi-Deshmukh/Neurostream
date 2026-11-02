@@ -13,6 +13,7 @@ from plotly.subplots import make_subplots
 import streamlit as st
 import torch
 
+from neurostream.dashboard.helpers import resolve_repo_path, trial_slider_key
 from neurostream.dashboard.simulation import ReplaySimulationData, TrialReplayEngine
 from neurostream.evaluation.artifacts import load_evaluation_artifact
 
@@ -25,13 +26,6 @@ CHECKPOINT_DIR = next(
     ) if path.is_dir()),
     (PROJECT_ROOT / 'results' / 'checkpoints').resolve(),
 )
-
-def resolve_repo_path(value: str | Path) -> Path:
-    path = Path(value).expanduser()
-    if path.is_absolute():
-        return path
-    candidates = (PROJECT_ROOT / path, PROJECT_ROOT / 'scripts' / path)
-    return next((candidate.resolve() for candidate in candidates if candidate.exists()), candidates[0].resolve())
 
 # ── Page Configuration & Enterprise Styling ────────────────────────────────────
 
@@ -346,28 +340,27 @@ with tab_replay:
     # Playback Controls Bar
     ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2.4, 1.0, 1.0])
 
-    if "trial_slider" not in st.session_state:
-        st.session_state["trial_slider"] = total_steps
+    slider_key = trial_slider_key(subject_id, projection_type, ckpt_file.stem)
 
-    def _jump_to(step_val: int):
-        st.session_state["trial_slider"] = step_val
+    def _jump_to(widget_key: str, step_val: int):
+        st.session_state[widget_key] = step_val
 
     with ctrl_col2:
         st.write("")
         st.write("")
-        st.button("⏩ Jump to End", width="stretch", on_click=_jump_to, args=(total_steps,))
+        st.button("⏩ Jump to End", width="stretch", on_click=_jump_to, args=(slider_key, total_steps))
 
     with ctrl_col3:
         st.write("")
         st.write("")
-        st.button("⏮️ Jump to Start", width="stretch", on_click=_jump_to, args=(1,))
+        st.button("⏮️ Jump to Start", width="stretch", on_click=_jump_to, args=(slider_key, 1))
 
     with ctrl_col1:
         current_step = st.slider(
             "Streaming Replay Position (Trial Index)",
             min_value=1,
             max_value=total_steps,
-            key=f"trial_slider_{subject_id}_{projection_type}",
+            key=slider_key,
             help="Drag to inspect prototype positions, confidence scores, and adaptation decisions at any timestep.",
         )
 
@@ -375,7 +368,7 @@ with tab_replay:
     current_record = sim_data.steps[current_step - 1]
 
     # Metrics Ribbon (Professional 5-Column Grid)
-    m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
+    m_col1, m_col2, m_col3, m_col4, m_col5, m_col6 = st.columns(6)
     m_col1.metric("STREAMED TRIALS", f"{current_step} / {total_steps}")
     
     gain_so_far = current_record.cumulative_accuracy - current_record.static_baseline_accuracy
@@ -403,6 +396,14 @@ with tab_replay:
         ),
         delta="Measured fraction of spike opportunities",
         delta_color="off",
+    )
+    retention_delta = sim_data.session1_retention_accuracy - sim_data.session1_initial_accuracy
+    m_col6.metric(
+        "SESSION 1 TRAIN RETENTION",
+        f"{sim_data.session1_retention_accuracy:.1%}",
+        delta=f"{retention_delta:+.1%} vs initial S1 train",
+        delta_color="normal" if retention_delta >= 0 else "inverse",
+        help="In-sample Session 1 training-set retention after the complete replay. This is a diagnostic, not held-out source generalization.",
     )
 
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
@@ -470,7 +471,7 @@ with tab_replay:
 
         # 4. Trajectory Trails of Adapting Prototypes
         for c_idx in range(len(sim_data.class_names)):
-            traj = np.array([sim_data.steps[i].prototypes_2d[c_idx] for i in range(current_step)])
+            traj = sim_data.prototype_history_2d[:current_step, c_idx, :]
             fig_manifold.add_trace(
                 go.Scatter(
                     x=traj[:, 0],
@@ -693,8 +694,8 @@ with tab_cross_subject:
         checkpoint_data_rows = []
         valid_seeds = []
         for run_record in run_records:
-            c_p = Path(run_record["checkpoint"])
-            artifact_path = Path(run_record["evaluation_artifact"])
+            c_p = resolve_repo_path(run_record["checkpoint"])
+            artifact_path = resolve_repo_path(run_record["evaluation_artifact"])
             if not c_p.exists() or not artifact_path.exists():
                 continue
             try:
