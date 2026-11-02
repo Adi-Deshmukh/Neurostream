@@ -331,13 +331,14 @@ elif page == "Signal Analysis":
         if st.session_state.get("ns_signal_contract"):
             st.caption(f"Checkpoint preprocessing contract: {st.session_state['ns_signal_contract']}")
         if st.button("Compute channel × band power"):
+            from scipy.integrate import trapezoid
             from scipy.signal import welch
             freqs, psd = welch(data.X[trial], fs=data.sfreq, axis=-1, nperseg=min(256, data.X.shape[-1]))
             bands = {"Alpha (8–13 Hz)": (8,13), "Beta (13–30 Hz)": (13,30), "Gamma (30–100 Hz)": (30,min(100,data.sfreq/2))}
             z = []
             for _, (lo, hi) in bands.items():
                 mask = (freqs >= lo) & (freqs < hi)
-                z.append(np.trapz(psd[:, mask], freqs[mask], axis=1) if mask.any() else np.full(data.X.shape[1], np.nan))
+                z.append(trapezoid(psd[:, mask], freqs[mask], axis=1) if mask.any() else np.full(data.X.shape[1], np.nan))
             heat = go.Figure(go.Heatmap(z=np.asarray(z).T, x=list(bands), y=channel_names, colorscale="Viridis", colorbar_title="Power (preprocessed units²)"))
             heat.update_layout(title="Channel × frequency-band power · selected trial", xaxis_title="Frequency band", yaxis_title="EEG channel", height=620)
             render_plotly(heat)
