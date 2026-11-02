@@ -26,13 +26,16 @@ def resolve_artifact_path(root: Path, value: str | Path) -> Path:
 
 
 def _manifest_paths(root: Path) -> list[Path]:
-    base = root / "results"
-    if not base.exists():
-        return []
-    return sorted(
-        (path for path in base.rglob("evaluation_manifest.json") if path.is_file()),
-        key=lambda path: str(path),
-    )
+    bases = (root / "results", root / "scripts" / "results")
+    found = set()
+    for base in bases:
+        if base.exists():
+            found.update(
+                path.resolve()
+                for path in base.rglob("evaluation_manifest.json")
+                if path.is_file()
+            )
+    return sorted(found, key=lambda path: str(path))
 
 
 def discover_experiments(root: Path | None = None) -> list[dict[str, Any]]:
