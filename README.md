@@ -65,6 +65,8 @@ The output is written under `results/dashboard_cache/`. The app loads it only wh
 
 The preparation command stores feature matrices, labels, prototypes, projection coordinates/state, measured spike activity and provenance. It does not store raw EEG epochs or encoded spike tensors. Signal Analysis is a separate explicit operation that loads the dataset into the current Streamlit session.
 
+See [the dashboard audit, changelog and performance report](docs/dashboard-audit-and-performance-report.md) for root causes, data boundaries, repository cleanup and verification status.
+
 ### Preprocessing and calibration contract
 
 The current pipeline is **offline and epoch-based**. Preprocessing uses a
