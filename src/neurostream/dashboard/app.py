@@ -466,16 +466,25 @@ if requires_engine:
             f"{engine.checkpoint_ref}:{engine.prototypes_ref}:"
             f"subject-{subject_id}:projection-{projection_type}"
         )
-        sim_data = run_cached_replay(
-            engine,
-            replay_identity,
-            momentum,
-            confidence_thresh,
-            enable_consolidation,
-            int(cons_interval),
-            int(sleep_steps),
-            pull_rate,
-        )
+        try:
+            sim_data = run_cached_replay(
+                engine,
+                replay_identity,
+                momentum,
+                confidence_thresh,
+                enable_consolidation,
+                int(cons_interval),
+                int(sleep_steps),
+                pull_rate,
+            )
+        except Exception as replay_error:
+            st.error(
+                "The replay could not be computed for the selected configuration. "
+                "Your page navigation is still available; check the error details below."
+            )
+            st.exception(replay_error)
+            st.stop()
+
         measurement = sim_data.measurement
         if measurement is None or measurement.checkpoint_ref != engine.checkpoint_ref:
             st.error(
