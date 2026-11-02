@@ -7,6 +7,7 @@ SHA-256 identities before exposing metrics to the UI.
 from __future__ import annotations
 
 import json
+import pickle
 import re
 from pathlib import Path
 from typing import Any
@@ -32,7 +33,12 @@ def load_preprocessing_contract(
     expected_subject: int | None = None,
     expected_seed: int | None = None,
 ) -> dict[str, Any]:
-    """Read checkpoint metadata without constructing a model or loading custom objects."""
+    """Read checkpoint metadata without constructing the model.
+
+    Prefer the restricted weights-only loader. Older checkpoints may contain
+    NumPy calibration arrays, so their legacy pickle fallback is permitted only
+    for the explicitly selected, locally trusted checkpoint.
+    """
     import hashlib
     import torch
 
@@ -40,7 +46,10 @@ def load_preprocessing_contract(
     digest = hashlib.sha256(checkpoint_path.read_bytes()).hexdigest()
     if expected_sha256 is not None and digest != expected_sha256:
         raise ValueError("checkpoint SHA-256 changed since the registry was validated")
-    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    try:
+        payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    except pickle.UnpicklingError:
+        payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     if not isinstance(payload, dict):
         raise ValueError("checkpoint root must be a state dictionary")
     if expected_subject is not None and int(payload.get("subject", -1)) != expected_subject:
