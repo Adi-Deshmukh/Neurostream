@@ -41,7 +41,7 @@ python -c "from neurostream.dashboard.simulation import TrialReplayEngine; print
 
 Then navigate to `http://localhost:8501` in your browser.
 
-The dashboard is an artifact-first research workstation with seven views:
+The dashboard is an artifact-first research workstation with eight views:
 
 - **Overview:** selected experiment metrics, subject-wise comparisons, recent validated runs and checkpoint provenance.
 - **Signal Analysis:** explicit, on-demand loading of preprocessed EEG epochs; when a validated run is selected, it reads the checkpoint's epoch/filter/channel/normalization contract and verifies checkpoint subject, seed and hash before applying the saved normalization. It includes channel/trial/window selection, cue marker, session comparison, band-power heatmaps and epoch quality checks. Without a selected run, the default-loader view is clearly marked as unbound to a checkpoint.
@@ -50,6 +50,7 @@ The dashboard is an artifact-first research workstation with seven views:
 - **Benchmark Lab:** subject × seed heatmaps, metric comparisons, per-subject variability and confusion matrices from validated evaluation artifacts.
 - **Consolidation Study:** paired ON/OFF analysis joined on exact subject and seed, with paired differences and uncertainty intervals. No conclusion is shown when a paired report is absent.
 - **Experiment Registry:** manifest entries, checkpoint/evaluation validation status, hashes, run metadata and prepared-cache inventory.
+- **Visual Analytics:** one consolidated eight-panel workspace for EEG waveform, frequency-band power, confusion matrix, subject × seed accuracy, prototype movement/drift, confidence distribution, measured layer activity and paired consolidation ablation. EEG and replay panels reuse explicitly loaded session artifacts; missing measurements are identified rather than fabricated.
 
 The overview, benchmark and registry views do not instantiate the SNN, load EEG, deserialize checkpoints, fit projections, or execute replay. The registry reads local JSON manifests and validates evaluation artifacts against the SHA-256 of the referenced checkpoint. Missing, stale, malformed or mismatched artifacts are reported as unavailable rather than represented as zero.
 
@@ -144,6 +145,18 @@ counts. It does not claim that consolidation improves retention unless the paire
 results support that claim. Prototype drift immediately before/after each
 consolidation event is not present in the current ablation report and is therefore
 not plotted.
+
+### Visual Analytics
+
+The consolidated Visual Analytics workspace places the eight requested research views
+on one page. Load EEG sessions explicitly from Signal Analysis to populate the EEG
+waveform and band-power panels. Run the offline replay once from Adaptation Replay
+to populate prototype trajectories, consolidation drift and confidence distribution.
+The confusion matrix, subject × seed heatmap, measured layer activity and paired
+consolidation comparison are sourced from validated evaluation artifacts or
+checkpoint-matched prepared caches. Missing confusion matrices, layer measurements
+or ON/OFF ablation reports are shown as unavailable with the required provenance;
+they are not reconstructed from aggregate accuracy or guessed values.
 
 ### Experiment Registry
 The registry lists manifest entries, checkpoint/evaluation paths, validation
