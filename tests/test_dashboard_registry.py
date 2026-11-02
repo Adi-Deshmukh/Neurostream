@@ -132,7 +132,10 @@ def test_checkpoint_preprocessing_contract_is_read_without_model_construction(tm
     }
     torch.save({
         "model_state_dict": {"weight": torch.ones(2)},
+        "subject": 1, "seed": 42,
         "preprocessing_contract": expected,
     }, checkpoint)
     digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
-    assert load_preprocessing_contract(checkpoint, digest) == expected
+    assert load_preprocessing_contract(
+        checkpoint, digest, expected_subject=1, expected_seed=42
+    ) == expected
