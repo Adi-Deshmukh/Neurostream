@@ -953,6 +953,85 @@ with tab_architecture:
         else:
             st.info("No valid spike-activity measurements are available for this run.")
 
+    st.markdown("---")
+    st.markdown("### Paired Sleep-Consolidation Ablation")
+    st.caption(
+        "Runs the same checkpoint, subject, trial order, momentum and confidence "
+        "threshold with consolidation ON and OFF. The ON run uses deterministic "
+        "synthetic-noise seeding derived from the checkpoint run ID."
+    )
+    run_ablation = st.checkbox(
+        "Compute paired consolidation ON/OFF comparison",
+        value=False,
+        key="run_consolidation_ablation",
+    )
+    if run_ablation:
+        ablation_identity = (
+            f"{engine.checkpoint_ref}:subject-{subject_id}:"
+            f"projection-{projection_type}:paired-ablation"
+        )
+        ablation_on = run_cached_replay(
+            engine, f"{ablation_identity}:on", momentum, confidence_thresh,
+            True, int(cons_interval), int(sleep_steps), pull_rate,
+        )
+        ablation_off = run_cached_replay(
+            engine, f"{ablation_identity}:off", momentum, confidence_thresh,
+            False, int(cons_interval), int(sleep_steps), pull_rate,
+        )
+        ablation_rows = [
+            {
+                "Condition": "Consolidation OFF",
+                "Target prequential accuracy": ablation_off.adapted_target_accuracy * 100,
+                "Session 1 train retention": ablation_off.session1_retention_accuracy * 100,
+                "Session 1 forgetting": (
+                    ablation_off.session1_initial_accuracy
+                    - ablation_off.session1_retention_accuracy
+                ) * 100,
+            },
+            {
+                "Condition": "Consolidation ON",
+                "Target prequential accuracy": ablation_on.adapted_target_accuracy * 100,
+                "Session 1 train retention": ablation_on.session1_retention_accuracy * 100,
+                "Session 1 forgetting": (
+                    ablation_on.session1_initial_accuracy
+                    - ablation_on.session1_retention_accuracy
+                ) * 100,
+            },
+        ]
+        ablation_frame = pd.DataFrame(ablation_rows)
+        st.dataframe(
+            ablation_frame.style.format({
+                "Target prequential accuracy": "{:.2f}%",
+                "Session 1 train retention": "{:.2f}%",
+                "Session 1 forgetting": "{:.2f} pp",
+            }),
+            width="stretch",
+        )
+        ablation_fig = go.Figure()
+        for metric_name in (
+            "Target prequential accuracy",
+            "Session 1 train retention",
+        ):
+            ablation_fig.add_trace(go.Bar(
+                x=ablation_frame["Condition"],
+                y=ablation_frame[metric_name],
+                name=metric_name,
+            ))
+        ablation_fig.update_layout(
+            title="Paired consolidation ablation",
+            yaxis_title="Accuracy (%)",
+            barmode="group",
+            height=380,
+            margin=dict(l=10, r=10, t=55, b=10),
+        )
+        st.plotly_chart(ablation_fig, width="stretch")
+        st.caption(
+            "Session 1 retention is measured on the Session 1 training features "
+            "used by this replay engine. It is an in-sample diagnostic, not "
+            "held-out source-session generalization. One subject/checkpoint run "
+            "is not sufficient evidence for a general consolidation claim."
+        )
+
 
 # =============================================================================
 # TAB 4: DASHBOARD GUIDE & ARCHITECTURE
