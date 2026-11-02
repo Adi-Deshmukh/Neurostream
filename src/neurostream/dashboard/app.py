@@ -386,8 +386,11 @@ elif page == "Adaptation Replay":
         projection = st.selectbox("Projection basis", ["PCA", "UMAP"], index=0)
         cache_dir = ROOT / "results" / "dashboard_cache" / f"subject_{subject}_{checkpoint.stem}_{projection.lower()}"
         cache_file = cache_dir / "metadata.json"
-        if not cache_file.is_file():
-            st.warning(f"Prepared replay cache not found: {cache_dir}")
+        cache_inputs = (
+            cache_file, cache_dir / "features.npz", cache_dir / "projector.joblib"
+        )
+        if not all(path.is_file() for path in cache_inputs):
+            st.warning(f"Prepared replay cache is missing or incomplete: {cache_dir}")
             st.code(
                 f'python scripts/precompute_dashboard_artifacts.py --subject {subject} '
                 f'--checkpoint "{checkpoint}" --prototypes "{prototype}" --projection {projection}',
@@ -397,9 +400,13 @@ elif page == "Adaptation Replay":
             st.warning(f"Prototype file not found next to selected checkpoint: {prototype}")
         else:
             prototype_hash = hashlib.sha256(prototype.read_bytes()).hexdigest()
+            cache_signature = ":".join(
+                f"{path.stat().st_mtime_ns}-{path.stat().st_size}"
+                for path in cache_inputs
+            )
             identity = hashlib.sha256(
                 f"{run['artifact']['checkpoint_sha256']}:{prototype_hash}:"
-                f"{projection}:{cache_file.stat().st_mtime_ns}".encode()
+                f"{projection}:{cache_signature}".encode()
             ).hexdigest()
             if st.session_state.get("ns_engine_identity") != identity:
                 st.session_state.pop("ns_engine", None)
@@ -418,6 +425,13 @@ elif page == "Adaptation Replay":
                     st.exception(error)
             engine = st.session_state.get("ns_engine")
             if engine is not None:
+                if projection == "UMAP" and not str(engine.projection_method).upper().startswith("UMAP"):
+                    st.warning(
+                        f"UMAP was requested, but this prepared artifact uses "
+                        f"{engine.projection_method}. The fallback is shown explicitly."
+                    )
+                else:
+                    st.caption(f"Prepared reference projection: {engine.projection_method}")
                 with st.form("ns_replay_settings"):
                     momentum = st.slider("Prototype momentum", 0.50, 0.99, 0.90, 0.01)
                     threshold = st.slider("Confidence threshold", 0.25, 0.95, 0.60, 0.05)
