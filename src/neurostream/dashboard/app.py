@@ -33,7 +33,7 @@ CLASS_COLORS = ("#3976A8", "#269B83", "#D39A45", "#8B79B8")
 
 st.set_page_config(
     page_title="NeuroStream Research Workstation",
-    page_icon="NS",
+    page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -95,6 +95,8 @@ def metric_frame(rows):
         m = row["metrics"]
         records.append({
             "Subject": row["subject"], "Seed": row["seed"],
+            "Run ID": row["artifact"].get("run_id"),
+            "Created UTC": row["artifact"].get("created_at_utc"),
             "Static target": m.get("target_static_baseline_acc"),
             "Prequential target": m.get("target_prequential_acc"),
             "Retrospective target": m.get("target_retrospective_acc"),
