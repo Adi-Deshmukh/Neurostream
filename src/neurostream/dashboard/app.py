@@ -16,6 +16,7 @@ import torch
 
 from neurostream.dashboard.helpers import resolve_repo_path, trial_slider_key
 from neurostream.dashboard.simulation import ReplaySimulationData, TrialReplayEngine
+from neurostream.data.loader import load_bnci2014_001
 from neurostream.evaluation.artifacts import load_evaluation_artifact
 
 # Resolve paths independently of the process working directory.
@@ -211,6 +212,7 @@ active_page = st.sidebar.radio(
     "Research view",
     options=[
         "Offline Trial Replay",
+        "EEG Signal Analysis",
         "Cross-Subject Benchmarks",
         "Measured Spike Activity",
         "Platform Guide",
@@ -275,6 +277,12 @@ else:
     cons_interval = 25
     sleep_steps = 5
     pull_rate = 0.5
+
+
+@st.cache_data(ttl=900, show_spinner="Loading and preprocessing EEG sessions...")
+def load_signal_sessions(subject: int):
+    """Load preprocessed EEG epochs in memory for signal inspection only."""
+    return load_bnci2014_001(subjects=subject)
 
 
 @st.cache_data(show_spinner=False)
@@ -1128,7 +1136,174 @@ if active_page == "Measured Spike Activity":
 
 
 # =============================================================================
-# TAB 4: DASHBOARD GUIDE & ARCHITECTURE
+# EEG SIGNAL ANALYSIS
+# =============================================================================
+if active_page == "EEG Signal Analysis":
+    st.markdown("### EEG Signal Analysis")
+    st.caption(
+        "Inspect preprocessed BNCI2014-001 trial epochs. These are offline, "
+        "zero-phase filtered and demeaned epochs—not live EEG and not raw continuous recordings."
+    )
+    try:
+        signal_sessions = load_signal_sessions(subject_id)
+    except Exception as error:
+        st.error(
+            "Could not load the EEG sessions. Check the MOABB dataset download, "
+            "MNE cache location, and network access."
+        )
+        st.exception(error)
+        st.stop()
+
+    session_names = list(signal_sessions.keys())
+    if not session_names:
+        st.warning("No EEG sessions were returned for this subject.")
+        st.stop()
+
+    selected_session_name = st.selectbox(
+        "EEG session",
+        options=session_names,
+        format_func=lambda value: value,
+        key=f"signal_session_{subject_id}",
+    )
+    signal_session = signal_sessions[selected_session_name]
+    n_trials, n_channels, n_samples = signal_session.X.shape
+    if n_trials < 1 or n_channels < 1 or n_samples < 2:
+        st.error("The selected session contains no usable EEG epochs.")
+        st.stop()
+
+    signal_trial_key = f"signal_trial_{subject_id}_{selected_session_name}"
+    if signal_trial_key not in st.session_state:
+        st.session_state[signal_trial_key] = 1
+    else:
+        st.session_state[signal_trial_key] = min(
+            max(int(st.session_state[signal_trial_key]), 1), n_trials
+        )
+    selected_trial = st.slider(
+        "Trial",
+        min_value=1,
+        max_value=n_trials,
+        key=signal_trial_key,
+    )
+    trial_index = selected_trial - 1
+    trial = np.asarray(signal_session.X[trial_index], dtype=np.float32)
+    trial_metadata = (
+        signal_session.metadata[trial_index]
+        if trial_index < len(signal_session.metadata) else {}
+    )
+    event_label = str(trial_metadata.get("event", "Unknown"))
+
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Trials", f"{n_trials:,}")
+    metric_cols[1].metric("EEG channels", str(n_channels))
+    metric_cols[2].metric("Sampling rate", f"{signal_session.sfreq:.1f} Hz")
+    metric_cols[3].metric("Event class", event_label.replace("_", " ").title())
+
+    channel_names = list(signal_session.channel_names)
+    if len(channel_names) != n_channels:
+        channel_names = [f"EEG {index + 1}" for index in range(n_channels)]
+    selected_channel = st.selectbox(
+        "Channel",
+        options=channel_names,
+        key=f"signal_channel_{subject_id}_{selected_session_name}",
+    )
+    channel_index = channel_names.index(selected_channel)
+    time_seconds = np.arange(n_samples, dtype=np.float64) / signal_session.sfreq
+
+    waveform_fig = go.Figure()
+    waveform_fig.add_trace(go.Scatter(
+        x=time_seconds,
+        y=trial[channel_index] * 1e6,
+        mode="lines",
+        name=selected_channel,
+        line=dict(width=1.2),
+    ))
+    waveform_fig.update_layout(
+        title=f"Preprocessed EEG waveform — {selected_channel} — Trial {selected_trial}",
+        xaxis_title="Time relative to imagery cue (s)",
+        yaxis_title="Amplitude (µV)",
+        height=390,
+        margin=dict(l=15, r=15, t=55, b=15),
+    )
+    st.plotly_chart(waveform_fig, width="stretch")
+
+    from scipy.signal import welch
+
+    frequencies, psd = welch(
+        trial,
+        fs=signal_session.sfreq,
+        axis=-1,
+        nperseg=min(256, n_samples),
+        scaling="density",
+    )
+    selected_psd = psd[channel_index] * 1e12
+    psd_fig = go.Figure(go.Scatter(
+        x=frequencies,
+        y=selected_psd,
+        mode="lines",
+        name="Power spectral density",
+        line=dict(width=1.5),
+    ))
+    psd_fig.update_layout(
+        title=f"Power spectral density — {selected_channel}",
+        xaxis_title="Frequency (Hz)",
+        yaxis_title="PSD (µV²/Hz)",
+        xaxis=dict(range=[0, min(100, signal_session.sfreq / 2)]),
+        height=350,
+        margin=dict(l=15, r=15, t=55, b=15),
+    )
+    st.plotly_chart(psd_fig, width="stretch")
+
+    frequency_bands = {
+        "Alpha 8–13 Hz": (8.0, 13.0),
+        "Beta 13–30 Hz": (13.0, 30.0),
+        "Gamma 30–100 Hz": (30.0, min(100.0, signal_session.sfreq / 2 - 1e-6)),
+    }
+    band_power_rows = []
+    band_power_matrix = []
+    valid_band_names = []
+    for band_name, (low_hz, high_hz) in frequency_bands.items():
+        mask = (frequencies >= low_hz) & (frequencies < high_hz)
+        if int(mask.sum()) < 2:
+            continue
+        power = np.trapz(psd[:, mask], frequencies[mask], axis=1) * 1e12
+        band_power_matrix.append(power)
+        valid_band_names.append(band_name)
+        band_power_rows.append({
+            "Band": band_name,
+            "Selected-channel power (µV²)": float(power[channel_index]),
+        })
+
+    if band_power_matrix:
+        band_power = np.column_stack(band_power_matrix)
+        heatmap_values = 10.0 * np.log10(np.maximum(band_power, np.finfo(float).tiny))
+        heatmap_fig = go.Figure(go.Heatmap(
+            z=heatmap_values,
+            x=valid_band_names,
+            y=channel_names,
+            colorbar=dict(title="dB re µV²"),
+            hovertemplate="Channel: %{y}<br>Band: %{x}<br>Power: %{z:.2f} dB re µV²<extra></extra>",
+        ))
+        heatmap_fig.update_layout(
+            title=f"Band-power distribution across EEG channels — Trial {selected_trial}",
+            xaxis_title="Frequency band",
+            yaxis_title="EEG channel",
+            height=max(420, min(760, 22 * n_channels + 180)),
+            margin=dict(l=15, r=15, t=55, b=15),
+        )
+        st.plotly_chart(heatmap_fig, width="stretch")
+        st.dataframe(pd.DataFrame(band_power_rows), hide_index=True, width="stretch")
+
+    st.caption(
+        f"Preprocessing: {signal_session.l_freq:g}–{signal_session.h_freq:g} Hz "
+        f"zero-phase Butterworth bandpass; {signal_session.tmin:g}–"
+        f"{signal_session.tmax:g} s epoch window relative to trial start; "
+        f"per-trial channel demeaning. The PSD and band-power values describe "
+        f"this processed epoch and are not source-session or model-accuracy metrics."
+    )
+
+
+# =============================================================================
+# TAB 5: DASHBOARD GUIDE & ARCHITECTURE
 # =============================================================================
 if active_page == "Platform Guide":
     st.markdown("### 📖 Architecture & Experimental Protocol Guide")
