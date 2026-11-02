@@ -200,29 +200,24 @@ else:
     proto_file = CHECKPOINT_DIR / f"prototypes_subject_{subject_id}.pt"
     artifact_file = ckpt_file.parent / f"evaluation_subject_{subject_id}.json"
 
-if not ckpt_file.exists() or not proto_file.exists():
-    st.sidebar.error(f"Checkpoint for Subject {subject_id} not found in results/checkpoints/")
-    st.stop()
-checkpoint_data = torch.load(ckpt_file, map_location="cpu", weights_only=False)
-
 projection_type = st.sidebar.radio(
     "2D Reference Basis",
     options=["PCA", "UMAP"],
     index=0,
-    help="Fixed 2D projection basis fitted on Session 1 features. Eliminates manifold jitter.",
+    help="Fixed 2D reference projection fitted on Session 1 features.",
 )
 
-prepared_cache_dir = (
-    PROJECT_ROOT / "results" / "dashboard_cache"
-    / f"subject_{subject_id}_{ckpt_file.stem}_{projection_type.lower()}"
+active_page = st.sidebar.radio(
+    "Research view",
+    options=[
+        "Offline Trial Replay",
+        "Cross-Subject Benchmarks",
+        "Measured Spike Activity",
+        "Platform Guide",
+    ],
+    key="dashboard_research_view",
 )
-if not (prepared_cache_dir / "metadata.json").is_file():
-    st.sidebar.info(
-        "No prepared feature cache exists for this selection. First load will "
-        "preprocess EEG and extract SNN features. To precompute once, run "
-        "`python scripts/precompute_dashboard_artifacts.py --subject "
-        + str(subject_id) + " --projection " + projection_type + "`."
-    )
+requires_replay = active_page in ("Offline Trial Replay", "Measured Spike Activity")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚡ Phase B Streaming Parameters")
@@ -255,8 +250,6 @@ sleep_steps = st.sidebar.number_input("Correction Iterations", min_value=1, max_
 pull_rate = st.sidebar.slider("Pull Strength (λ)", min_value=0.1, max_value=1.0, value=0.5, step=0.1)
 
 
-# ── Load Replay Engine & Cache Simulation ────────────────────────────────────
-
 @st.cache_resource(show_spinner="Loading prepared replay features...")
 def load_engine(c_path: str, p_path: str, s_id: int, proj: str) -> TrialReplayEngine:
     checkpoint_ref = hashlib.sha256(Path(c_path).read_bytes()).hexdigest()
@@ -283,8 +276,6 @@ def load_engine(c_path: str, p_path: str, s_id: int, proj: str) -> TrialReplayEn
         projection_method=proj,
     )
 
-engine = load_engine(str(ckpt_file), str(proto_file), subject_id, projection_type)
-
 
 @st.cache_data(show_spinner="Simulating streaming trial adaptation...")
 def run_cached_replay(
@@ -306,46 +297,92 @@ def run_cached_replay(
         pull_rate=p_rate,
     )
 
-sim_data = run_cached_replay(
-    engine,
-    f"{engine.checkpoint_ref}:subject-{subject_id}:projection-{projection_type}",
-    momentum,
-    confidence_thresh,
-    enable_consolidation,
-    int(cons_interval),
-    int(sleep_steps),
-    pull_rate,
-)
-measurement = sim_data.measurement
-if measurement is None or measurement.checkpoint_ref != engine.checkpoint_ref:
-    st.error("Current simulation measurements are unavailable or do not match the selected checkpoint.")
-    measurement = None
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Run Provenance")
-st.sidebar.caption(f"Checkpoint: `{ckpt_file}`")
-st.sidebar.caption(f"Checkpoint SHA-256: `{engine.checkpoint_ref}`")
-if artifact_file.exists():
-    try:
-        selected_artifact = load_evaluation_artifact(
-            artifact_file, checkpoint_path=ckpt_file, subject=subject_id
+engine = None
+sim_data = None
+measurement = None
+checkpoint_data = {}
+encoder_timesteps = None
+encoder_channels = None
+total_steps = 0
+
+if requires_replay:
+    if not ckpt_file.exists() or not proto_file.exists():
+        st.sidebar.error(
+            f"Checkpoint for Subject {subject_id} not found in results/checkpoints/"
         )
-        st.sidebar.caption(f"Evaluation session: `{selected_artifact['evaluation_session']}`")
-        st.sidebar.caption(f"Protocol: `{selected_artifact['protocol']}`")
-        st.sidebar.caption(f"Evaluation run ID: `{selected_artifact['run_id']}`")
-        st.sidebar.caption(f"Artifact created: `{selected_artifact['created_at_utc']}`")
-    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
-        st.sidebar.warning(f"Evaluation provenance unavailable: {error}")
-if measurement is not None:
-    st.sidebar.caption(f"Replay run ID: `{measurement.run_id}`")
-    st.sidebar.caption(f"Measurement time: `{measurement.measured_at_utc}`")
+        st.stop()
 
-encoder_metadata = checkpoint_data.get("encoder_calibration", {})
-encoder_timesteps = encoder_metadata.get("n_timesteps")
-encoder_channels = encoder_metadata.get("channel_count")
-if encoder_timesteps is None or encoder_channels is None:
-    st.error("Selected checkpoint lacks encoder timestep/channel metadata.")
+    checkpoint_data = torch.load(
+        ckpt_file, map_location="cpu", weights_only=False
+    )
+    prepared_cache_dir = (
+        PROJECT_ROOT / "results" / "dashboard_cache"
+        / f"subject_{subject_id}_{ckpt_file.stem}_{projection_type.lower()}"
+    )
+    if not (prepared_cache_dir / "metadata.json").is_file():
+        st.sidebar.info(
+            "No prepared feature cache exists for this selection. First load will "
+            "preprocess EEG and extract SNN features. To precompute once, run "
+            "`python scripts/precompute_dashboard_artifacts.py --subject "
+            + str(subject_id) + " --projection " + projection_type + "`."
+        )
 
+    engine = load_engine(str(ckpt_file), str(proto_file), subject_id, projection_type)
+    replay_identity = (
+        f"{engine.checkpoint_ref}:subject-{subject_id}:projection-{projection_type}"
+    )
+    sim_data = run_cached_replay(
+        engine,
+        replay_identity,
+        momentum,
+        confidence_thresh,
+        enable_consolidation,
+        int(cons_interval),
+        int(sleep_steps),
+        pull_rate,
+    )
+    measurement = sim_data.measurement
+    if measurement is None or measurement.checkpoint_ref != engine.checkpoint_ref:
+        st.error(
+            "Current simulation measurements are unavailable or do not match "
+            "the selected checkpoint."
+        )
+        measurement = None
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### Run Provenance")
+    st.sidebar.caption(f"Checkpoint: `{ckpt_file}`")
+    st.sidebar.caption(f"Checkpoint SHA-256: `{engine.checkpoint_ref}`")
+    if artifact_file.exists():
+        try:
+            selected_artifact = load_evaluation_artifact(
+                artifact_file, checkpoint_path=ckpt_file, subject=subject_id
+            )
+            st.sidebar.caption(
+                f"Evaluation session: `{selected_artifact['evaluation_session']}`"
+            )
+            st.sidebar.caption(
+                f"Protocol: `{selected_artifact['protocol']}`"
+            )
+            st.sidebar.caption(
+                f"Evaluation run ID: `{selected_artifact['run_id']}`"
+            )
+            st.sidebar.caption(
+                f"Artifact created: `{selected_artifact['created_at_utc']}`"
+            )
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+            st.sidebar.warning(f"Evaluation provenance unavailable: {error}")
+    if measurement is not None:
+        st.sidebar.caption(f"Replay run ID: `{measurement.run_id}`")
+        st.sidebar.caption(f"Measurement time: `{measurement.measured_at_utc}`")
+
+    encoder_metadata = checkpoint_data.get("encoder_calibration", {})
+    encoder_timesteps = encoder_metadata.get("n_timesteps")
+    encoder_channels = encoder_metadata.get("channel_count")
+    if encoder_timesteps is None or encoder_channels is None:
+        st.error("Selected checkpoint lacks encoder timestep/channel metadata.")
+    total_steps = len(sim_data.steps)
 
 def _format_activity(value: float | None) -> str:
     if value is None or not np.isfinite(value):
@@ -354,19 +391,12 @@ def _format_activity(value: float | None) -> str:
 
 total_steps = len(sim_data.steps)
 
-# ── Primary View Tabs ────────────────────────────────────────────────────────
-
-tab_replay, tab_cross_subject, tab_architecture, tab_guide = st.tabs([
-    "🎯 Offline Trial Replay",
-    "📊 Cross-Subject Benchmarks (Table 5)",
-    "⚡ Measured Spike Activity",
-    "📖 Platform Guide & Theory",
-])
+# Views are selected with a sidebar navigator so inactive pages are not computed.
 
 # =============================================================================
 # TAB 1: LIVE STREAMING REPLAY
 # =============================================================================
-with tab_replay:
+if active_page == "Offline Trial Replay":
     # Playback Controls Bar
     ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2.4, 1.0, 1.0])
 
@@ -696,7 +726,7 @@ with tab_replay:
 # =============================================================================
 # TAB 2: CROSS-SUBJECT BENCHMARKS (TABLE 5)
 # =============================================================================
-with tab_cross_subject:
+if active_page == "Cross-Subject Benchmarks":
     st.markdown("### 📊 Cross-Subject Experimental Results (Table 5)")
     st.caption("Metrics are loaded from hash-validated held-out evaluation artifacts; synthetic smoke-test outputs are not benchmark evidence.")
 
@@ -865,7 +895,7 @@ with tab_cross_subject:
 # =============================================================================
 # TAB 3: NEUROMORPHIC ENERGY & SPARSITY
 # =============================================================================
-with tab_architecture:
+if active_page == "Measured Spike Activity":
     st.markdown("### ⚡ Measured Spike Activity")
     st.caption("Offline, trial-by-trial replay using zero-phase epoch preprocessing; not a real-time BCI or direct energy measurement.")
 
@@ -1036,7 +1066,7 @@ with tab_architecture:
 # =============================================================================
 # TAB 4: DASHBOARD GUIDE & ARCHITECTURE
 # =============================================================================
-with tab_guide:
+if active_page == "Platform Guide":
     st.markdown("### 📖 Architecture & Experimental Protocol Guide")
     st.markdown(
         """
