@@ -7,6 +7,7 @@ checkpoint, fits a projection, or reruns an experiment.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 from pathlib import Path
 
@@ -38,6 +39,24 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Streamlit changed chart/table sizing from use_container_width to width="stretch".
+# Detect the installed API so both the project's older minimum and current releases work.
+_PLOTLY_HAS_WIDTH = "width" in inspect.signature(st.plotly_chart).parameters
+_DATAFRAME_HAS_WIDTH = "width" in inspect.signature(st.dataframe).parameters
+
+
+def render_plotly(figure, **kwargs):
+    if _PLOTLY_HAS_WIDTH:
+        return st.plotly_chart(figure, width="stretch", **kwargs)
+    return st.plotly_chart(figure, use_container_width=True, **kwargs)
+
+
+def render_dataframe(data, **kwargs):
+    if _DATAFRAME_HAS_WIDTH:
+        return st.dataframe(data, width="stretch", **kwargs)
+    return st.dataframe(data, use_container_width=True, **kwargs)
+
 
 st.markdown(
     """
@@ -133,7 +152,7 @@ st.sidebar.caption("Adaptive spiking BCI · BNCI2014-001")
 page = st.sidebar.radio("Workspace", PAGES, index=0, key="ns_page")
 st.sidebar.markdown('---')
 st.sidebar.caption(f"{len(valid)} validated runs · {len(registry) - len(valid)} unavailable or rejected")
-if st.sidebar.button("Refresh artifact registry", use_container_width=True):
+if st.sidebar.button("Refresh artifact registry"):
     st.session_state.ns_registry = discover_experiments(ROOT)
     st.rerun()
 
@@ -163,14 +182,14 @@ if page == "Overview":
             for col, color in zip(("Static target", "Prequential target", "Retrospective target"), CLASS_COLORS[:3]):
                 fig.add_trace(go.Bar(x=grouped["Subject"], y=grouped[col], name=col, marker_color=color))
             fig.update_layout(title="Target-session performance by subject (mean across available seeds)", barmode="group", yaxis_title="Accuracy", yaxis_range=[0,1], height=390)
-            st.plotly_chart(fig, use_container_width=True)
+            render_plotly(fig)
         with right:
             st.markdown("#### Run provenance")
             st.code(f"Checkpoint\n{run['checkpoint_path']}\n\nSHA-256\n{run['artifact']['checkpoint_sha256']}\n\nArtifact\n{run['evaluation_path']}", language="text")
             st.caption(f"Created: {run['artifact']['created_at_utc']}")
         st.markdown("#### Recent validated runs")
         recent = sorted(valid, key=lambda r: r["artifact"].get("created_at_utc", ""), reverse=True)[:8]
-        st.dataframe(metric_frame(recent), use_container_width=True, hide_index=True)
+        render_dataframe(metric_frame(recent), hide_index=True)
         st.caption("Prequential accuracy is trial-by-trial prediction before that trial's prototype update. Retrospective accuracy is a separate post-replay diagnostic.")
 
 elif page == "Signal Analysis":
@@ -305,7 +324,7 @@ elif page == "Signal Analysis":
             )
         fig.update_layout(title=f"{session_name} · trial {trial+1} · {channel_names[channel]}",
                           xaxis_title="Time (s) from epoch start", yaxis_title="Amplitude (preprocessed units)", height=380)
-        st.plotly_chart(fig, use_container_width=True)
+        render_plotly(fig)
         st.caption(f"Sampling rate: {data.sfreq:g} Hz · epoch: {data.tmin:g} to {data.tmax:g} s relative to {data.epoch_reference} · preprocessing: {data.l_freq:g}–{data.h_freq:g} Hz band-pass.")
         if data.epoch_reference == "trial_start":
             st.caption("The dataset event marks trial start, which precedes this epoch. The dashed line marks the imagery cue onset when it falls inside the selected window.")
@@ -321,7 +340,7 @@ elif page == "Signal Analysis":
                 z.append(np.trapz(psd[:, mask], freqs[mask], axis=1) if mask.any() else np.full(data.X.shape[1], np.nan))
             heat = go.Figure(go.Heatmap(z=np.asarray(z).T, x=list(bands), y=channel_names, colorscale="Viridis", colorbar_title="Power (preprocessed units²)"))
             heat.update_layout(title="Channel × frequency-band power · selected trial", xaxis_title="Frequency band", yaxis_title="EEG channel", height=620)
-            st.plotly_chart(heat, use_container_width=True)
+            render_plotly(heat)
         st.markdown("#### Session 1 vs Session 2")
         train_name = next((name for name in names if "train" in name.lower()), None)
         test_name = next((name for name in names if "test" in name.lower()), None)
@@ -348,7 +367,7 @@ elif page == "Signal Analysis":
                 xaxis_title="Time (s) from epoch start",
                 yaxis_title="Amplitude (preprocessed units)", height=360,
             )
-            st.plotly_chart(compare_fig, use_container_width=True)
+            render_plotly(compare_fig)
         else:
             st.info("Both training and test sessions are not present in the loaded dataset result.")
         st.markdown("#### Epoch quality checks")
@@ -384,7 +403,7 @@ elif page == "Model Diagnostics":
         if isinstance(layer, dict) and layer:
             fig = go.Figure(go.Bar(x=list(layer), y=list(layer.values()), marker_color="#269B83"))
             fig.update_layout(title="Measured activity fraction by instrumented layer", yaxis_title="Fraction of spike opportunities", yaxis_range=[0,1], height=360)
-            st.plotly_chart(fig, use_container_width=True)
+            render_plotly(fig)
         else:
             st.info("Per-layer activity is not present in this evaluation artifact. No per-neuron or layer-level values are inferred.")
         st.markdown("#### Architecture")
@@ -427,7 +446,7 @@ elif page == "Model Diagnostics":
                     yaxis_title="Fraction of spike opportunities",
                     yaxis_range=[0, 1], height=340,
                 )
-                st.plotly_chart(layer_fig, use_container_width=True)
+                render_plotly(layer_fig)
             st.caption(
                 f"Prepared replay provenance: {metadata.get('run_id')} · "
                 f"projection {metadata.get('projection_method')} · "
@@ -468,7 +487,7 @@ elif page == "Model Diagnostics":
                     xaxis_title="Projection dimension 1", yaxis_title="Projection dimension 2",
                     height=520,
                 )
-                st.plotly_chart(feature_fig, use_container_width=True)
+                render_plotly(feature_fig)
         else:
             st.info("No prepared replay metadata matches this checkpoint. Per-layer activity and feature-space views are unavailable until the matching cache is prepared.")
         confusion = config.get("prequential_confusion_matrix")
@@ -476,7 +495,7 @@ elif page == "Model Diagnostics":
         if confusion is not None and labels:
             fig = confusion_figure(confusion, labels, "Prequential target confusion matrix")
             if fig is not None:
-                st.plotly_chart(fig, use_container_width=True)
+                render_plotly(fig)
         else:
             st.info("No prequential confusion matrix was stored for this run.")
 
@@ -594,14 +613,14 @@ elif page == "Adaptation Replay":
                             fig.add_trace(go.Scatter(x=current_proto[:,0],y=current_proto[:,1],mode="markers",marker=dict(symbol="star",size=17,color=list(CLASS_COLORS[:len(replay.class_names)])),name="Current prototypes"))
                             fig.add_trace(go.Scatter(x=[step.feature_2d[0]],y=[step.feature_2d[1]],mode="markers",marker=dict(symbol="diamond",size=13,color="#D39A45"),name="Current trial"))
                             fig.update_layout(title="Fixed reference feature space",xaxis_title="Projection dimension 1",yaxis_title="Projection dimension 2",height=540)
-                            st.plotly_chart(fig,use_container_width=True)
+                            render_plotly(fig)
                         with right:
                             xs = np.arange(1,current+1)
                             fig = go.Figure()
                             fig.add_trace(go.Scatter(x=xs,y=[x.cumulative_accuracy for x in replay.steps[:current]],name="Prequential"))
                             fig.add_trace(go.Scatter(x=xs,y=[x.static_baseline_accuracy for x in replay.steps[:current]],name="Static",line=dict(dash="dash")))
                             fig.update_layout(title="Accuracy progression",xaxis_title="Trial",yaxis_title="Cumulative accuracy",yaxis_range=[0,1],height=360)
-                            st.plotly_chart(fig,use_container_width=True)
+                            render_plotly(fig)
                             st.metric("Session 1 train retention", pct(replay.session1_retention_accuracy))
                             st.metric("Adaptation gain", pct(replay.adaptation_gain))
                         accepted_count = sum(1 for item in replay.steps[:current] if item.accepted)
@@ -621,7 +640,7 @@ elif page == "Adaptation Replay":
                             xaxis_title="Trial", yaxis_title="Drift loss (recorded at trigger)",
                             height=300,
                         )
-                        st.plotly_chart(drift_fig, use_container_width=True)
+                        render_plotly(drift_fig)
                         confidence_fig = go.Figure(go.Histogram(
                             x=[item.confidence for item in replay.steps[:current]],
                             nbinsx=20, marker_color="#3976A8",
@@ -635,18 +654,18 @@ elif page == "Adaptation Replay":
                             xaxis_title="Prediction confidence", yaxis_title="Trial count",
                             height=300,
                         )
-                        st.plotly_chart(confidence_fig, use_container_width=True)
+                        render_plotly(confidence_fig)
                         displacement = np.linalg.norm(
                             step.prototypes_2d - replay.initial_prototypes_2d, axis=1
                         )
                         st.markdown("#### Per-class prototype movement")
-                        st.dataframe(pd.DataFrame({
+                        render_dataframe(pd.DataFrame({
                             "Class": replay.class_names,
                             "2D projected displacement": displacement,
-                        }), use_container_width=True, hide_index=True)
+                        }), hide_index=True)
                         st.caption("Displacement is measured in the fixed 2D projection coordinates. High-dimensional per-trial prototype history is not stored by this replay schema.")
                         decisions = pd.DataFrame([{"Trial":x.step,"True":replay.class_names[x.true_label],"Predicted":replay.class_names[x.predicted_label],"Confidence":x.confidence,"Accepted":x.accepted,"Consolidation":x.sleep_consolidation_triggered,"Drift":x.drift_loss} for x in replay.steps])
-                        st.dataframe(decisions.iloc[max(0,current-20):current],use_container_width=True,hide_index=True)
+                        render_dataframe(decisions.iloc[max(0,current-20):current],hide_index=True)
 
 elif page == "Benchmark Lab":
     header("Benchmark lab", "Compare validated subjects and seeds. Missing metrics remain missing; they are never replaced with zero.")
@@ -666,21 +685,21 @@ elif page == "Benchmark Lab":
             pivot = filtered.pivot_table(index="Subject", columns="Seed", values=metric, aggfunc="mean")
             fig = go.Figure(go.Heatmap(z=pivot.to_numpy(dtype=float), x=[str(x) for x in pivot.columns], y=[str(x) for x in pivot.index], colorscale="Blues", zmin=0 if "gain" not in metric.lower() else None, zmax=1 if "gain" not in metric.lower() else None, colorbar_title="Accuracy / gain", hovertemplate="Subject %{y}<br>Seed %{x}<br>Value %{z:.3f}<extra></extra>"))
             fig.update_layout(title=f"Subject × seed · {metric}", xaxis_title="Seed", yaxis_title="Subject", height=420)
-            st.plotly_chart(fig,use_container_width=True)
+            render_plotly(fig)
             means = filtered.groupby("Subject")[metric].mean()
             stds = filtered.groupby("Subject")[metric].std()
             summary = pd.DataFrame({"Mean":means,"Seed SD":stds})
             st.markdown("#### Subject-wise variability")
-            st.dataframe(summary,use_container_width=True)
+            render_dataframe(summary)
             seed_summary = filtered.groupby("Seed")[metric].agg(["mean", "std", "count"])
             st.markdown("#### Seed-wise variability")
-            st.dataframe(seed_summary, use_container_width=True)
+            render_dataframe(seed_summary)
             fig2 = go.Figure()
             for col,color in zip(("Static target","Prequential target","Retrospective target"),CLASS_COLORS[:3]):
                 grp=filtered.groupby("Subject")[col].mean()
                 fig2.add_trace(go.Bar(x=grp.index,y=grp.values,name=col,marker_color=color))
             fig2.update_layout(title="Static, prequential and retrospective comparison",barmode="group",yaxis_title="Accuracy",yaxis_range=[0,1],height=390)
-            st.plotly_chart(fig2,use_container_width=True)
+            render_plotly(fig2)
             eligible = [
                 item for item in valid
                 if item["subject"] in chosen_subjects and item["seed"] in chosen_seeds
@@ -695,10 +714,10 @@ elif page == "Benchmark Lab":
                 if cm is not None and labels:
                     fig_cm = confusion_figure(cm, labels, "Stored prequential confusion matrix")
                     if fig_cm:
-                        st.plotly_chart(fig_cm, use_container_width=True)
+                        render_plotly(fig_cm)
                 else:
                     st.info("The selected evaluation artifact does not contain a confusion matrix.")
-        st.dataframe(filtered,use_container_width=True,hide_index=True)
+        render_dataframe(filtered,hide_index=True)
 
 elif page == "Consolidation Study":
     header("Consolidation study", "Paired comparison of consolidation ON versus OFF. Only matched subject–seed pairs are compared.")
@@ -740,7 +759,7 @@ elif page == "Consolidation Study":
                 fig=go.Figure(go.Box(y=diffs,boxpoints="all",name="ON − OFF",marker_color="#3976A8"))
                 fig.add_hline(y=0,line_dash="dash",line_color="#65788c")
                 fig.update_layout(title=f"Paired differences · {label}",yaxis_title="Difference (fraction)",height=380)
-                st.plotly_chart(fig,use_container_width=True)
+                render_plotly(fig)
             else:
                 st.info("Selected outcome is not available for the matched pairs.")
             trigger_rows = []
@@ -755,9 +774,9 @@ elif page == "Consolidation Study":
             if trigger_rows:
                 st.markdown("#### Consolidation trigger frequency")
                 trigger_frame = pd.DataFrame(trigger_rows)
-                st.dataframe(trigger_frame, use_container_width=True, hide_index=True)
+                render_dataframe(trigger_frame, hide_index=True)
             st.caption("The current ablation report records consolidation phase counts but not prototype coordinates immediately before and after each consolidation event. Those drift measurements are therefore not fabricated or plotted.")
-            st.dataframe(df,use_container_width=True,hide_index=True)
+            render_dataframe(df,hide_index=True)
 
 elif page == "Experiment Registry":
     header("Experiment registry", "Manifest, checkpoint and evaluation-artifact integrity. No model is instantiated to populate this page.")
@@ -773,7 +792,7 @@ elif page == "Experiment Registry":
                 "Manifest":str(item["manifest_path"]),
                 "Error":item["error"],
             })
-        st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+        render_dataframe(pd.DataFrame(rows),hide_index=True)
         st.markdown("#### Selected artifact provenance")
         if valid:
             item=st.selectbox("Run",valid,format_func=lambda r:f"S{r['subject']:02d} · seed {r['seed']}")
@@ -792,5 +811,5 @@ elif page == "Experiment Registry":
         cache_entries=list(cache_root.glob("*/metadata.json")) if cache_root.exists() else []
         st.caption(f"Prepared feature caches discovered: {len(cache_entries)}")
         if cache_entries:
-            st.dataframe(pd.DataFrame([{"Cache":str(p.parent.relative_to(ROOT)),"Metadata bytes":p.stat().st_size} for p in cache_entries]),use_container_width=True,hide_index=True)
+            render_dataframe(pd.DataFrame([{"Cache":str(p.parent.relative_to(ROOT)),"Metadata bytes":p.stat().st_size} for p in cache_entries]),hide_index=True)
 
