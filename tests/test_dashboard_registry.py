@@ -45,3 +45,21 @@ def test_paired_ablation_joins_exact_subject_seed_pairs():
 def test_project_root_is_repository_root():
     from neurostream.dashboard.registry import project_root
     assert (project_root() / "pyproject.toml").is_file()
+
+
+def test_manifest_discovery_includes_legacy_scripts_results_root(tmp_path):
+    root = tmp_path
+    manifest_dir = root / "scripts" / "results" / "checkpoints"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "evaluation_manifest.json").write_text(json.dumps({
+        "schema_version": 1,
+        "runs": [{
+            "subject": 1, "seed": 7,
+            "checkpoint": "scripts/results/checkpoints/missing.pt",
+            "evaluation_artifact": "scripts/results/checkpoints/missing.json",
+        }],
+    }))
+    rows = discover_experiments(root)
+    assert len(rows) == 1
+    assert rows[0]["seed"] == 7
+    assert rows[0]["status"] == "missing_checkpoint"
