@@ -59,3 +59,8 @@ def test_dashboard_pages_have_distinct_navigation_options() -> None:
     )
     for page in expected_pages:
         assert f'"{page}"' in source
+
+
+def test_replay_result_uses_resource_cache_for_fast_widget_reruns() -> None:
+    source = APP_PATH.read_text(encoding="utf-8")
+    assert '@st.cache_resource(show_spinner="Simulating streaming trial adaptation...")' in source
