@@ -14,7 +14,11 @@ from plotly.subplots import make_subplots
 import streamlit as st
 import torch
 
-from neurostream.dashboard.helpers import resolve_repo_path, trial_slider_key
+from neurostream.dashboard.helpers import (
+    clamp_trial_index,
+    resolve_repo_path,
+    trial_slider_key,
+)
 from neurostream.dashboard.simulation import ReplaySimulationData, TrialReplayEngine
 from neurostream.data.loader import load_bnci2014_001
 from neurostream.evaluation.artifacts import load_evaluation_artifact
@@ -478,8 +482,8 @@ if active_page == "Offline Trial Replay":
     if slider_key not in st.session_state:
         st.session_state[slider_key] = 1
     else:
-        st.session_state[slider_key] = min(
-            max(int(st.session_state[slider_key]), 1), total_steps
+        st.session_state[slider_key] = clamp_trial_index(
+            st.session_state[slider_key], total_steps
         )
 
     with ctrl_col2:
@@ -503,7 +507,7 @@ if active_page == "Offline Trial Replay":
             help="Move through the precomputed replay. This changes the displayed trial, not the underlying model run.",
         )
 
-    current_step = min(max(int(current_step), 1), total_steps)
+    current_step = clamp_trial_index(current_step, total_steps)
     current_record = sim_data.steps[current_step - 1]
 
     # Metrics Ribbon (Professional 5-Column Grid)
