@@ -189,6 +189,7 @@ class TrialReplayEngine:
                 sleep_steps=sleep_steps,
                 noise_std=noise_std,
                 pull_rate=pull_rate,
+                seed=int(hashlib.sha256(self.run_id.encode("utf-8")).hexdigest()[:8], 16),
             )
 
         steps: list[ReplayStepRecord] = []
