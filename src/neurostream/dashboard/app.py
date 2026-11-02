@@ -408,13 +408,15 @@ elif page == "Model Diagnostics":
         else:
             st.info("Per-layer activity is not present in this evaluation artifact. No per-neuron or layer-level values are inferred.")
         st.markdown("#### Architecture")
-        hidden_width = int(config.get("model_hidden", 256))
-        feature_width = int(config.get("model_out_features", 128))
+        hidden_width = config.get("model_hidden", "checkpoint-defined")
+        feature_width = config.get("model_out_features", "checkpoint-defined")
         st.code(
             f"Input spike tensor → FC-{hidden_width} → LIF1 → "
             f"FC-{feature_width} → LIF2 → mean spike-rate feature ({feature_width}-D)",
             language="text",
         )
+        if hidden_width == "checkpoint-defined":
+            st.caption("The evaluation manifest does not repeat the hidden width; the checkpoint remains the architecture source of truth.")
         st.caption("Architecture is read from the project model definition. Spike activity is not hardware power or energy consumption.")
         cache_root = ROOT / "results" / "dashboard_cache"
         matching_metadata = []
