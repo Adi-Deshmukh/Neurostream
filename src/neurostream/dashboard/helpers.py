@@ -34,3 +34,10 @@ def trial_slider_key(
         )
         key = f"{key}_{safe_identity}"
     return key
+
+
+def clamp_trial_index(value: int, total_steps: int) -> int:
+    """Clamp a requested replay position to the available 1-based trial range."""
+    if total_steps < 1:
+        raise ValueError("total_steps must be at least 1")
+    return min(max(int(value), 1), int(total_steps))
