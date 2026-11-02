@@ -139,3 +139,28 @@ def test_checkpoint_preprocessing_contract_is_read_without_model_construction(tm
     assert load_preprocessing_contract(
         checkpoint, digest, expected_subject=1, expected_seed=42
     ) == expected
+
+
+def test_checkpoint_contract_supports_legacy_numpy_calibration_payload(tmp_path):
+    import hashlib
+    import numpy as np
+    import torch
+
+    checkpoint = tmp_path / "legacy_phase_a.pt"
+    mean = np.asarray([0.1, -0.2], dtype=np.float32)
+    std = np.asarray([0.8, 1.2], dtype=np.float32)
+    torch.save({
+        "subject": 1, "seed": 42,
+        "preprocessing_contract": {
+            "normalization": {
+                "method": "training_fitted_channel_zscore",
+                "mean": mean, "std": std,
+            },
+        },
+    }, checkpoint)
+    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    contract = load_preprocessing_contract(
+        checkpoint, digest, expected_subject=1, expected_seed=42
+    )
+    assert np.array_equal(contract["normalization"]["mean"], mean)
+    assert np.array_equal(contract["normalization"]["std"], std)
