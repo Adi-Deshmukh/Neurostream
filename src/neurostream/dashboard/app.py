@@ -197,6 +197,8 @@ elif page == "Signal Analysis":
                     contract = load_preprocessing_contract(
                         run["checkpoint_path"],
                         expected_sha256=run["artifact"]["checkpoint_sha256"],
+                        expected_subject=subject,
+                        expected_seed=int(run["seed"]),
                     )
                     epoch = contract.get("epoch_window_seconds", {})
                     filters = contract.get("filter_settings", {})
