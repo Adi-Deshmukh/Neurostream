@@ -191,8 +191,8 @@ if manifest_path.exists():
         st.sidebar.error(f"Evaluation manifest rejected: {error}")
 
 if selected_run is not None:
-    ckpt_file = resolve_repo_path(selected_run["checkpoint"])
-    artifact_file = resolve_repo_path(selected_run["evaluation_artifact"])
+    ckpt_file = resolve_repo_path(PROJECT_ROOT, selected_run["checkpoint"])
+    artifact_file = resolve_repo_path(PROJECT_ROOT, selected_run["evaluation_artifact"])
     proto_file = ckpt_file.with_name(f"prototypes_subject_{subject_id}.pt")
 else:
     ckpt_file = CHECKPOINT_DIR / f"phase_a_subject_{subject_id}.pt"
@@ -694,8 +694,8 @@ with tab_cross_subject:
         checkpoint_data_rows = []
         valid_seeds = []
         for run_record in run_records:
-            c_p = resolve_repo_path(run_record["checkpoint"])
-            artifact_path = resolve_repo_path(run_record["evaluation_artifact"])
+            c_p = resolve_repo_path(PROJECT_ROOT, run_record["checkpoint"])
+            artifact_path = resolve_repo_path(PROJECT_ROOT, run_record["evaluation_artifact"])
             if not c_p.exists() or not artifact_path.exists():
                 continue
             try:
