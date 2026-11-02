@@ -263,45 +263,50 @@ if requires_replay:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### ⚙️ Replay Configuration")
     st.sidebar.caption(
-        "Adjust the parameters to update the cached replay."
+        "Change the parameters, then apply them once. Trial navigation does not "
+        "recalculate the model."
     )
-    momentum = st.sidebar.slider(
-        "Prototype Momentum (1 - α)",
-        min_value=0.50,
-        max_value=0.99,
-        value=0.90,
-        step=0.01,
-        key="replay_momentum",
-        help="Higher values adapt more smoothly; lower values follow distribution shifts more quickly.",
-    )
-    confidence_thresh = st.sidebar.slider(
-        "Confidence Threshold (τ)",
-        min_value=0.25,
-        max_value=0.95,
-        value=0.60,
-        step=0.05,
-        key="replay_confidence_threshold",
-        help="Minimum cosine softmax confidence required to update prototype positions.",
-    )
-    st.sidebar.markdown("#### Sleep Consolidation")
-    enable_consolidation = st.sidebar.checkbox(
-        "Enable Sleep Consolidation",
-        value=True,
-        key="replay_enable_consolidation",
-        help="Uses synthetic noisy feature snapshots around Session 1 prototypes.",
-    )
-    cons_interval = st.sidebar.number_input(
-        "Interval (steps)", min_value=10, max_value=100, value=25, step=5,
-        key="replay_consolidation_interval",
-    )
-    sleep_steps = st.sidebar.number_input(
-        "Correction Iterations", min_value=1, max_value=15, value=5,
-        key="replay_sleep_steps",
-    )
-    pull_rate = st.sidebar.slider(
-        "Pull Strength (λ)", min_value=0.1, max_value=1.0,
-        value=0.5, step=0.1, key="replay_pull_rate",
-    )
+    with st.sidebar.form("replay_configuration_form"):
+        momentum = st.slider(
+            "Prototype Momentum (1 - α)",
+            min_value=0.50,
+            max_value=0.99,
+            value=0.90,
+            step=0.01,
+            key="replay_momentum",
+            help="Higher values adapt more smoothly; lower values follow distribution shifts more quickly.",
+        )
+        confidence_thresh = st.slider(
+            "Confidence Threshold (τ)",
+            min_value=0.25,
+            max_value=0.95,
+            value=0.60,
+            step=0.05,
+            key="replay_confidence_threshold",
+            help="Minimum cosine softmax confidence required to update prototype positions.",
+        )
+        st.markdown("#### Sleep Consolidation")
+        enable_consolidation = st.checkbox(
+            "Enable Sleep Consolidation",
+            value=True,
+            key="replay_enable_consolidation",
+            help="Uses synthetic noisy feature snapshots around Session 1 prototypes.",
+        )
+        cons_interval = st.number_input(
+            "Interval (steps)", min_value=10, max_value=100, value=25, step=5,
+            key="replay_consolidation_interval",
+        )
+        sleep_steps = st.number_input(
+            "Correction Iterations", min_value=1, max_value=15, value=5,
+            key="replay_sleep_steps",
+        )
+        pull_rate = st.slider(
+            "Pull Strength (λ)", min_value=0.1, max_value=1.0,
+            value=0.5, step=0.1, key="replay_pull_rate",
+        )
+        st.form_submit_button(
+            "Apply replay settings", type="primary", use_container_width=True
+        )
 
 else:
     momentum = 0.90
@@ -387,12 +392,8 @@ encoder_timesteps = None
 encoder_channels = None
 total_steps = 0
 requires_engine = requires_replay or active_page == "Model Diagnostics"
-if not requires_engine:
-    st.session_state["dashboard_engine_load_requested"] = False
-if active_page != "Cross-Subject Benchmarks":
-    st.session_state["dashboard_benchmarks_load_requested"] = False
-if active_page != "EEG Signal Analysis":
-    st.session_state["dashboard_signal_load_requested"] = False
+# Keep completed page-load requests across navigation. Resetting these flags
+# on every page switch made returning to a page look like a failed navigation.
 prepared_cache_dir = (
     PROJECT_ROOT / "results" / "dashboard_cache"
     / f"subject_{subject_id}_{ckpt_file.stem}_{projection_type.lower()}"
@@ -855,7 +856,7 @@ if active_page == "Offline Trial Replay":
         confusion_fig.update_layout(title='Prequential confusion matrix',
             xaxis_title='Predicted class', yaxis_title='True class',
             height=390, margin=dict(l=10, r=10, t=55, b=10))
-        st.plotly_chart(confusion_fig, width='stretch')
+        st.plotly_chart(confusion_fig, use_container_width=True)
     with diagnostic_col2:
         confidence_fig = go.Figure()
         for class_index, class_name in enumerate(sim_data.class_names):
@@ -869,7 +870,7 @@ if active_page == "Offline Trial Replay":
         confidence_fig.update_layout(title='Confidence by true class',
             yaxis_title='Model confidence', yaxis_range=[0, 1],
             height=390, margin=dict(l=10, r=10, t=55, b=10))
-        st.plotly_chart(confidence_fig, width='stretch')
+        st.plotly_chart(confidence_fig, use_container_width=True)
 # =============================================================================
 # TAB 2: CROSS-SUBJECT BENCHMARKS (TABLE 5)
 # =============================================================================
