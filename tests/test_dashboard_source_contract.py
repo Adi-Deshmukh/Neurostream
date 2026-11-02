@@ -1,66 +1,66 @@
-"""Static contracts for dashboard widget compatibility and navigation."""
-
+"""Static source contracts for the artifact-first Streamlit dashboard."""
 import ast
 from pathlib import Path
 
 
 APP_PATH = (
     Path(__file__).resolve().parents[1]
-    / "src"
-    / "neurostream"
-    / "dashboard"
-    / "app.py"
+    / "src" / "neurostream" / "dashboard" / "app.py"
 )
 
 
-def _dashboard_tree() -> ast.Module:
+def source_tree():
     return ast.parse(APP_PATH.read_text(encoding="utf-8"))
 
 
-def test_streamlit_chart_width_arguments_are_compatible_with_minimum_version() -> None:
-    tree = _dashboard_tree()
-    chart_functions = {"plotly_chart", "dataframe"}
+def test_dashboard_app_is_valid_python():
+    assert isinstance(source_tree(), ast.Module)
 
+
+def test_navigation_contains_all_research_workspaces():
+    source = APP_PATH.read_text(encoding="utf-8")
+    for page in (
+        "Overview", "Signal Analysis", "Model Diagnostics",
+        "Adaptation Replay", "Benchmark Lab", "Consolidation Study",
+        "Experiment Registry",
+    ):
+        assert f'"{page}"' in source
+
+
+def test_normal_dashboard_does_not_use_streamlit_global_cache():
+    tree = source_tree()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        function = node.func
-        if not isinstance(function, ast.Attribute):
-            continue
-        if function.attr not in chart_functions:
-            continue
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            assert not (
+                isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "st"
+                and node.func.attr in {"cache_data", "cache_resource"}
+            ), "Dashboard should use explicit session-scoped state, not opaque global caches"
 
+
+def test_heavy_eeg_loading_is_explicitly_triggered():
+    source = APP_PATH.read_text(encoding="utf-8")
+    assert 'if st.button("Load EEG sessions", type="primary"):' in source
+    assert "load_bnci2014_001(subjects=subject)" in source
+
+
+def test_replay_uses_prepared_artifacts_and_explicit_submit():
+    source = APP_PATH.read_text(encoding="utf-8")
+    assert "TrialReplayEngine.from_prepared_artifact" in source
+    assert 'st.form_submit_button("Run offline replay")' in source
+    assert "engine.run_replay(" in source
+
+
+def test_chart_width_arguments_remain_compatible_with_streamlit_baseline():
+    tree = source_tree()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr not in {"plotly_chart", "dataframe"}:
+            continue
         for keyword in node.keywords:
             assert not (
                 keyword.arg == "width"
                 and isinstance(keyword.value, ast.Constant)
                 and keyword.value.value == "stretch"
-            ), (
-                f"{function.attr} at line {node.lineno} uses width='stretch', "
-                "which is not supported by the project's Streamlit >=1.30 baseline"
             )
-
-
-def test_replay_configuration_is_submitted_as_one_form() -> None:
-    source = APP_PATH.read_text(encoding="utf-8")
-    assert 'with st.sidebar.form("replay_configuration_form")' in source
-    assert "st.form_submit_button(" in source
-
-
-def test_dashboard_pages_have_distinct_navigation_options() -> None:
-    source = APP_PATH.read_text(encoding="utf-8")
-    expected_pages = (
-        "Offline Trial Replay",
-        "EEG Signal Analysis",
-        "Model Diagnostics",
-        "Cross-Subject Benchmarks",
-        "Measured Spike Activity",
-        "Platform Guide",
-    )
-    for page in expected_pages:
-        assert f'"{page}"' in source
-
-
-def test_replay_result_uses_resource_cache_for_fast_widget_reruns() -> None:
-    source = APP_PATH.read_text(encoding="utf-8")
-    assert '@st.cache_resource(show_spinner="Simulating streaming trial adaptation...")' in source
