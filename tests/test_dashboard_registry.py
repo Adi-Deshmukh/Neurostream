@@ -39,7 +39,7 @@ def test_paired_ablation_joins_exact_subject_seed_pairs():
     assert len(rows) == 1
     assert rows[0]["subject"] == 1
     assert rows[0]["seed"] == 42
-    assert rows[0]["target_prequential_acc_difference"] == 0.1
+    assert abs(rows[0]["target_prequential_acc_difference"] - 0.1) < 1e-9
 
 
 def test_project_root_is_repository_root():
