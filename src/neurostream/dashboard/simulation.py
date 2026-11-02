@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import hashlib
+import json
 from pathlib import Path
 from typing import Any, Sequence
+
+import joblib
 
 import numpy as np
 from sklearn.decomposition import PCA
@@ -278,6 +281,114 @@ class TrialReplayEngine:
                 [record.prototypes_2d for record in steps], axis=0
             ),
         )
+
+    def save_prepared_artifact(self, artifact_dir: str | Path) -> Path:
+        """Persist replay-ready features only; raw EEG and encoded spikes are excluded."""
+        target = Path(artifact_dir)
+        target.mkdir(parents=True, exist_ok=True)
+        arrays_path = target / "features.npz"
+        projector_path = target / "projector.joblib"
+        metadata_path = target / "metadata.json"
+
+        np.savez_compressed(
+            arrays_path,
+            session1_features=self.s1_features,
+            session2_features=self.s2_features,
+            session1_labels=self.s1_labels,
+            session2_labels=self.s2_labels,
+            initial_prototypes=self.initial_prototypes.cpu().numpy(),
+            session1_features_2d=self.s1_features_2d,
+            session2_features_2d=self.s2_features_2d,
+            initial_prototypes_2d=self.initial_prototypes_2d,
+            static_preds=self.static_preds,
+        )
+        joblib.dump(self.projector, projector_path)
+        metadata = {
+            "schema_version": 1,
+            "subject": self.subject,
+            "class_names": self.class_names,
+            "checkpoint_ref": self.checkpoint_ref,
+            "run_id": self.run_id,
+            "projection_method": self.projection_method,
+            "initial_target_accuracy": self.initial_target_accuracy,
+            "session1_initial_accuracy": self.session1_initial_accuracy,
+            "measurement": self.measurement.as_dict(),
+            "contains_raw_eeg": False,
+            "contains_encoded_spikes": False,
+        }
+        metadata_path.write_text(
+            json.dumps(metadata, indent=2), encoding="utf-8"
+        )
+        return target
+
+    @classmethod
+    def from_prepared_artifact(
+        cls,
+        artifact_dir: str | Path,
+        *,
+        checkpoint_ref: str,
+        subject: int,
+    ) -> "TrialReplayEngine":
+        """Load feature-only replay artifacts after validating their provenance."""
+        target = Path(artifact_dir)
+        metadata = json.loads((target / "metadata.json").read_text(encoding="utf-8"))
+        if metadata.get("schema_version") != 1:
+            raise ValueError("unsupported prepared replay artifact schema")
+        if int(metadata.get("subject", -1)) != int(subject):
+            raise ValueError("prepared replay artifact subject mismatch")
+        if metadata.get("checkpoint_ref") != checkpoint_ref:
+            raise ValueError("prepared replay artifact checkpoint hash mismatch")
+        if metadata.get("contains_raw_eeg") or metadata.get("contains_encoded_spikes"):
+            raise ValueError("prepared artifact violates feature-only storage contract")
+
+        with np.load(target / "features.npz", allow_pickle=False) as arrays:
+            required = {
+                "session1_features", "session2_features", "session1_labels",
+                "session2_labels", "initial_prototypes", "session1_features_2d",
+                "session2_features_2d", "initial_prototypes_2d", "static_preds",
+            }
+            missing = required.difference(arrays.files)
+            if missing:
+                raise ValueError(f"prepared replay artifact missing arrays: {sorted(missing)}")
+            instance = cls.__new__(cls)
+            instance.s1_features = arrays["session1_features"].copy()
+            instance.s2_features = arrays["session2_features"].copy()
+            instance.s1_labels = arrays["session1_labels"].copy()
+            instance.s2_labels = arrays["session2_labels"].copy()
+            instance.initial_prototypes = torch.as_tensor(
+                arrays["initial_prototypes"].copy(), dtype=torch.float32
+            )
+            instance.s1_features_2d = arrays["session1_features_2d"].copy()
+            instance.s2_features_2d = arrays["session2_features_2d"].copy()
+            instance.initial_prototypes_2d = arrays["initial_prototypes_2d"].copy()
+            instance.static_preds = arrays["static_preds"].copy()
+
+        if instance.s1_features.ndim != 2 or instance.s2_features.ndim != 2:
+            raise ValueError("prepared feature matrices must be two-dimensional")
+        if instance.s1_features.shape[1] != instance.s2_features.shape[1]:
+            raise ValueError("prepared session feature dimensions do not match")
+        if instance.s1_labels.size != instance.s1_features.shape[0]:
+            raise ValueError("prepared Session 1 labels do not match feature rows")
+        if instance.s2_labels.size != instance.s2_features.shape[0]:
+            raise ValueError("prepared Session 2 labels do not match feature rows")
+        if instance.static_preds.size != instance.s2_labels.size:
+            raise ValueError("prepared static predictions do not match Session 2 labels")
+
+        instance.subject = int(subject)
+        instance.checkpoint_ref = checkpoint_ref
+        instance.run_id = str(metadata["run_id"])
+        instance.class_names = list(metadata["class_names"])
+        instance.projection_method = str(metadata["projection_method"])
+        instance.projector = joblib.load(target / "projector.joblib")
+        instance.model = None
+        instance.s1_spikes = None
+        instance.s2_spikes = None
+        instance.initial_target_accuracy = float(metadata["initial_target_accuracy"])
+        instance.session1_initial_accuracy = float(metadata["session1_initial_accuracy"])
+        measurement_data = dict(metadata["measurement"])
+        measurement_data.pop("units", None)
+        instance.measurement = SpikeActivityMeasurement(**measurement_data)
+        return instance
 
     @classmethod
     def from_checkpoint(
