@@ -7,6 +7,7 @@ SHA-256 identities before exposing metrics to the UI.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -100,6 +101,35 @@ def discover_experiments(root: Path | None = None) -> list[dict[str, Any]]:
                     "status": "invalid_manifest_entry", "error": str(exc),
                     "artifact": None, "metrics": {},
                 }
+
+    # Surface orphaned/legacy checkpoints too, without treating them as evaluated runs.
+    referenced = {
+        str(row["checkpoint_path"])
+        for row in discovered.values()
+        if row.get("checkpoint_path") is not None
+    }
+    for checkpoint_root in (root / "results" / "checkpoints", root / "scripts" / "results" / "checkpoints"):
+        if not checkpoint_root.exists():
+            continue
+        for checkpoint in checkpoint_root.rglob("phase_a_subject_*.pt"):
+            resolved = checkpoint.resolve()
+            if str(resolved) in referenced:
+                continue
+            match = re.search(r"phase_a_subject_(\\d+)\\.pt$", checkpoint.name)
+            if not match:
+                continue
+            subject = int(match.group(1))
+            seed_match = re.search(r"seed_(\\d+)", str(checkpoint.parent))
+            seed = int(seed_match.group(1)) if seed_match else None
+            key = (subject, seed if seed is not None else -1, str(resolved))
+            discovered[key] = {
+                "subject": subject, "seed": seed, "manifest_path": None,
+                "checkpoint_path": resolved, "evaluation_path": None,
+                "status": "checkpoint_without_manifest",
+                "error": "Checkpoint exists, but no manifest-linked evaluation artifact was found.",
+                "artifact": None, "metrics": {},
+            }
+
     return sorted(
         discovered.values(),
         key=lambda row: (
