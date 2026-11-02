@@ -44,7 +44,7 @@ Then navigate to `http://localhost:8501` in your browser.
 The dashboard is an artifact-first research workstation with seven views:
 
 - **Overview:** selected experiment metrics, subject-wise comparisons, recent validated runs and checkpoint provenance.
-- **Signal Analysis:** explicit, on-demand loading of preprocessed EEG epochs; channel/trial/window selection, session comparison, band-power heatmaps and epoch quality checks. It does not label preprocessed epochs as raw EEG.
+- **Signal Analysis:** explicit, on-demand loading of preprocessed EEG epochs; when a validated run is selected, it reads the checkpoint's epoch/filter/channel/normalization contract and verifies checkpoint subject, seed and hash before applying the saved normalization. It includes channel/trial/window selection, cue marker, session comparison, band-power heatmaps and epoch quality checks. Without a selected run, the default-loader view is clearly marked as unbound to a checkpoint.
 - **Model Diagnostics:** model architecture, validated confusion matrix, measured layer activity when present in a matching prepared cache, and feature-space distributions loaded only on request.
 - **Adaptation Replay:** offline trial-by-trial replay from feature-only prepared artifacts. Settings are applied once; the trial slider and jump controls only navigate stored replay output.
 - **Benchmark Lab:** subject × seed heatmaps, metric comparisons, per-subject variability and confusion matrices from validated evaluation artifacts.
