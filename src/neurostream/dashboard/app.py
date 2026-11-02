@@ -219,54 +219,62 @@ active_page = st.sidebar.radio(
 )
 requires_replay = active_page in ("Offline Trial Replay", "Measured Spike Activity")
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### ⚙️ Replay Configuration")
-st.sidebar.caption(
-    "Adjust the parameters, then apply them once. This prevents every slider "
-    "movement from launching a complete replay."
-)
-with st.sidebar.form("replay_configuration_form"):
-    momentum = st.slider(
-        "Prototype Momentum (1 - α)",
-        min_value=0.50,
-        max_value=0.99,
-        value=0.90,
-        step=0.01,
-        key="replay_momentum",
-        help="Higher values adapt more smoothly; lower values follow distribution shifts more quickly.",
+if requires_replay:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### ⚙️ Replay Configuration")
+    st.sidebar.caption(
+        "Adjust the parameters, then apply them once. This prevents every slider "
+        "movement from launching a complete replay."
     )
-    confidence_thresh = st.slider(
-        "Confidence Threshold (τ)",
-        min_value=0.25,
-        max_value=0.95,
-        value=0.60,
-        step=0.05,
-        key="replay_confidence_threshold",
-        help="Minimum cosine softmax confidence required to update prototype positions.",
-    )
-    st.markdown("#### Sleep Consolidation")
-    enable_consolidation = st.checkbox(
-        "Enable Sleep Consolidation",
-        value=True,
-        key="replay_enable_consolidation",
-        help="Uses synthetic noisy feature snapshots around Session 1 prototypes.",
-    )
-    cons_interval = st.number_input(
-        "Interval (steps)", min_value=10, max_value=100, value=25, step=5,
-        key="replay_consolidation_interval",
-    )
-    sleep_steps = st.number_input(
-        "Correction Iterations", min_value=1, max_value=15, value=5,
-        key="replay_sleep_steps",
-    )
-    pull_rate = st.slider(
-        "Pull Strength (λ)", min_value=0.1, max_value=1.0,
-        value=0.5, step=0.1, key="replay_pull_rate",
-    )
-    apply_replay_config = st.form_submit_button(
-        "Apply replay settings", type="primary", width="stretch"
-    )
+    with st.sidebar.form("replay_configuration_form"):
+        momentum = st.slider(
+            "Prototype Momentum (1 - α)",
+            min_value=0.50,
+            max_value=0.99,
+            value=0.90,
+            step=0.01,
+            key="replay_momentum",
+            help="Higher values adapt more smoothly; lower values follow distribution shifts more quickly.",
+        )
+        confidence_thresh = st.slider(
+            "Confidence Threshold (τ)",
+            min_value=0.25,
+            max_value=0.95,
+            value=0.60,
+            step=0.05,
+            key="replay_confidence_threshold",
+            help="Minimum cosine softmax confidence required to update prototype positions.",
+        )
+        st.markdown("#### Sleep Consolidation")
+        enable_consolidation = st.checkbox(
+            "Enable Sleep Consolidation",
+            value=True,
+            key="replay_enable_consolidation",
+            help="Uses synthetic noisy feature snapshots around Session 1 prototypes.",
+        )
+        cons_interval = st.number_input(
+            "Interval (steps)", min_value=10, max_value=100, value=25, step=5,
+            key="replay_consolidation_interval",
+        )
+        sleep_steps = st.number_input(
+            "Correction Iterations", min_value=1, max_value=15, value=5,
+            key="replay_sleep_steps",
+        )
+        pull_rate = st.slider(
+            "Pull Strength (λ)", min_value=0.1, max_value=1.0,
+            value=0.5, step=0.1, key="replay_pull_rate",
+        )
+        apply_replay_config = st.form_submit_button(
+            "Apply replay settings", type="primary", width="stretch"
+        )
 
+else:
+    momentum = 0.90
+    confidence_thresh = 0.60
+    enable_consolidation = True
+    cons_interval = 25
+    sleep_steps = 5
+    pull_rate = 0.5
 
 
 @st.cache_data(show_spinner=False)
