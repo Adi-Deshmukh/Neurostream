@@ -62,6 +62,18 @@ def test_chart_sizing_adapts_to_installed_streamlit_api():
     assert source.count("st.dataframe(") == 2
 
 
+def test_replay_cache_identity_includes_checkpoint_and_prototype_hashes():
+    source = APP_PATH.read_text(encoding="utf-8")
+    prepare_source = (
+        APP_PATH.parents[3] / "scripts" / "precompute_dashboard_artifacts.py"
+    ).read_text(encoding="utf-8")
+    assert 'run["artifact"]["checkpoint_sha256"][:12]' in source
+    assert "prototype_hash[:12]" in source
+    assert "cache_signature" in source
+    assert "checkpoint_hash[:12]" in prepare_source
+    assert "prototype_hash[:12]" in prepare_source
+
+
 def test_all_dashboard_pages_render_without_experiment_artifacts():
     from types import SimpleNamespace
     import numpy as np
