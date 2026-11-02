@@ -511,16 +511,21 @@ elif page == "Adaptation Replay":
         checkpoint = run["checkpoint_path"]
         prototype = checkpoint.with_name(f"prototypes_subject_{subject}.pt")
         projection = st.selectbox("Projection basis", ["PCA", "UMAP"], index=0)
+        checkpoint_hash = hashlib.sha256(checkpoint.read_bytes()).hexdigest() if checkpoint.is_file() else "missing"
         prototype_hash = hashlib.sha256(prototype.read_bytes()).hexdigest() if prototype.is_file() else "missing"
         cache_dir = ROOT / "results" / "dashboard_cache" / (
             f"subject_{subject}_{checkpoint.stem}_"
-            f"{run['artifact']['checkpoint_sha256'][:12]}_{prototype_hash[:12]}_{projection.lower()}"
+            f"{checkpoint_hash[:12]}_{prototype_hash[:12]}_{projection.lower()}"
         )
         cache_file = cache_dir / "metadata.json"
         cache_inputs = (
             cache_file, cache_dir / "features.npz", cache_dir / "projector.joblib"
         )
-        if not prototype.is_file():
+        if not checkpoint.is_file():
+            st.error(f"Selected checkpoint no longer exists: {checkpoint}")
+        elif checkpoint_hash != run["artifact"]["checkpoint_sha256"]:
+            st.error("Checkpoint changed after registry validation. Refresh the artifact registry before replay.")
+        elif not prototype.is_file():
             st.warning(f"Prototype file not found next to selected checkpoint: {prototype}")
         elif not all(path.is_file() for path in cache_inputs):
             st.warning(f"Prepared replay cache is missing or incomplete: {cache_dir}")
@@ -535,7 +540,7 @@ elif page == "Adaptation Replay":
                 for path in cache_inputs
             )
             identity = hashlib.sha256(
-                f"{run['artifact']['checkpoint_sha256']}:{prototype_hash}:"
+                f"{checkpoint_hash}:{prototype_hash}:"
                 f"{projection}:{cache_signature}".encode()
             ).hexdigest()
             if st.session_state.get("ns_engine_identity") != identity:
@@ -546,7 +551,7 @@ elif page == "Adaptation Replay":
                 try:
                     from neurostream.dashboard.simulation import TrialReplayEngine
                     st.session_state["ns_engine"] = TrialReplayEngine.from_prepared_artifact(
-                        cache_dir, checkpoint_ref=run["artifact"]["checkpoint_sha256"],
+                        cache_dir, checkpoint_ref=checkpoint_hash,
                         subject=subject, prototypes_ref=prototype_hash,
                     )
                     st.session_state.pop("ns_replay", None)
