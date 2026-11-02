@@ -1,12 +1,11 @@
-"""Static source contracts for the artifact-first Streamlit dashboard."""
+"""Static source contracts and entrypoint navigation tests for the dashboard."""
 import ast
 from pathlib import Path
 
 
-APP_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "src" / "neurostream" / "dashboard" / "app.py"
-)
+ROOT = Path(__file__).resolve().parents[1]
+APP_PATH = ROOT / "src" / "neurostream" / "dashboard" / "app.py"
+ENTRYPOINT_PATH = ROOT / "dashboard" / "app.py"
 
 
 def source_tree():
@@ -15,6 +14,12 @@ def source_tree():
 
 def test_dashboard_app_is_valid_python():
     assert isinstance(source_tree(), ast.Module)
+
+
+def test_streamlit_entrypoint_reexecutes_dashboard_on_every_rerun():
+    source = ENTRYPOINT_PATH.read_text(encoding="utf-8")
+    assert "runpy.run_path(" in source
+    assert "from neurostream.dashboard.app import *" not in source
 
 
 def test_navigation_contains_all_research_workspaces():
@@ -57,7 +62,6 @@ def test_chart_sizing_adapts_to_installed_streamlit_api():
     assert '"width" in inspect.signature(st.dataframe).parameters' in source
     assert 'width="stretch"' in source
     assert "use_container_width=True" in source
-    # All page-level rendering goes through the two compatibility wrappers.
     assert source.count("st.plotly_chart(") == 2
     assert source.count("st.dataframe(") == 2
 
@@ -74,12 +78,13 @@ def test_replay_cache_identity_includes_checkpoint_and_prototype_hashes():
     assert "prototype_hash[:12]" in prepare_source
 
 
-def test_all_dashboard_pages_render_without_experiment_artifacts():
+def test_actual_streamlit_entrypoint_navigation_reruns_all_pages():
     from types import SimpleNamespace
     import numpy as np
     from streamlit.testing.v1 import AppTest
 
-    app = AppTest.from_file(str(APP_PATH), default_timeout=20).run()
+    # Test the exact file users launch, not only the imported dashboard module.
+    app = AppTest.from_file(str(ENTRYPOINT_PATH), default_timeout=20).run()
     assert not app.exception
     page_names = (
         "Signal Analysis", "Model Diagnostics", "Adaptation Replay",
@@ -88,10 +93,8 @@ def test_all_dashboard_pages_render_without_experiment_artifacts():
     )
     for page_name in page_names:
         app.sidebar.radio[0].set_value(page_name).run()
-        assert not app.exception, f"Dashboard page failed to render: {page_name}"
+        assert not app.exception, f"Dashboard entrypoint failed to render: {page_name}"
 
-    # Inject small deterministic epochs so the signal charts render without
-    # triggering MOABB downloads or relying on a local dataset cache.
     fixture = SimpleNamespace(
         X=np.random.default_rng(7).normal(size=(3, 2, 1000)).astype("float32"),
         y=np.array([1, 2, 1]),
