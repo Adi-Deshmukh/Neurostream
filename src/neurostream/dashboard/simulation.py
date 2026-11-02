@@ -62,6 +62,9 @@ class ReplaySimulationData:
     adaptation_gain: float = 0.0
     session1_retention_accuracy: float = 0.0
     session1_initial_accuracy: float = 0.0
+    prototype_history_2d: np.ndarray = field(
+        default_factory=lambda: np.empty((0, 0, 2), dtype=np.float32)
+    )
 
 
 class TrialReplayEngine:
@@ -271,6 +274,9 @@ class TrialReplayEngine:
             adaptation_gain=gain,
             session1_retention_accuracy=s1_retention,
             session1_initial_accuracy=self.session1_initial_accuracy,
+            prototype_history_2d=np.stack(
+                [record.prototypes_2d for record in steps], axis=0
+            ),
         )
 
     @classmethod
