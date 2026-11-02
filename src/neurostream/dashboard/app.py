@@ -215,7 +215,49 @@ elif page == "Signal Analysis":
             heat = go.Figure(go.Heatmap(z=np.asarray(z).T, x=list(bands), y=channel_names, colorscale="Viridis", colorbar_title="Power"))
             heat.update_layout(title="Channel × frequency-band power · selected trial", xaxis_title="Frequency band", yaxis_title="EEG channel", height=620)
             st.plotly_chart(heat, use_container_width=True)
-        st.info("The loader returns preprocessed epochs, not raw continuous EEG. This view must not be interpreted as a raw-signal display.")
+        st.markdown("#### Session 1 vs Session 2")
+        train_name = next((name for name in names if "train" in name.lower()), None)
+        test_name = next((name for name in names if "test" in name.lower()), None)
+        if train_name and test_name:
+            train_data, test_data = sessions[train_name], sessions[test_name]
+            compare_trial = st.number_input(
+                "Example trial index in each session (not a paired trial)",
+                min_value=1, max_value=max(1, min(train_data.X.shape[0], test_data.X.shape[0])),
+                value=1, step=1,
+            ) - 1
+            compare_fig = go.Figure()
+            for session_label, session_data, color in (
+                (train_name, train_data, "#3976A8"),
+                (test_name, test_data, "#269B83"),
+            ):
+                values = session_data.X[compare_trial, channel]
+                x_values = np.arange(values.size) / session_data.sfreq
+                compare_fig.add_trace(go.Scatter(
+                    x=x_values, y=values, mode="lines", name=session_label,
+                    line=dict(color=color, width=1.1),
+                ))
+            compare_fig.update_layout(
+                title=f"Illustrative session comparison · {channel_names[channel]}",
+                xaxis_title="Time (s) from epoch start",
+                yaxis_title="Amplitude (preprocessed units)", height=360,
+            )
+            st.plotly_chart(compare_fig, use_container_width=True)
+        else:
+            st.info("Both training and test sessions are not present in the loaded dataset result.")
+        st.markdown("#### Epoch quality checks")
+        epoch = data.X[trial]
+        flat_channels = [
+            channel_names[i] for i in range(epoch.shape[0])
+            if float(np.std(epoch[i])) <= 1e-12
+        ]
+        q1, q2, q3, q4 = st.columns(4)
+        q1.metric("Non-finite samples", str(int((~np.isfinite(epoch)).sum())))
+        q2.metric("Flat channels", str(len(flat_channels)))
+        q3.metric("Mean absolute amplitude", number(float(np.mean(np.abs(epoch))), 5))
+        q4.metric("Max peak-to-peak", number(float(np.ptp(epoch, axis=-1).max()), 5))
+        if flat_channels:
+            st.warning("Flat channels: " + ", ".join(flat_channels))
+        st.info("Only preprocessed epochs are available from this loader. Raw continuous, filtered-only, and normalized-stage signals are not separately retained here; the displayed waveform must not be labelled raw.")
 
 elif page == "Model Diagnostics":
     header("Model diagnostics", "Feature-space and measured spike-activity diagnostics from the selected prepared replay artifact.")
