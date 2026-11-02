@@ -615,10 +615,13 @@ elif page == "Consolidation Study":
                 "Source retention":"source_accuracy_after_adaptation",
                 "Static target baseline":"target_static_baseline_acc",
                 "Adaptation gain":"adaptation_gain",
+                "Forgetting (source accuracy drop)":"source_retention_delta",
+                "Measured spike activity":"spike_sparsity",
             }
             label=st.selectbox("Paired outcome",list(choices))
             key=choices[label]
-            diffs=df[f"{key}_difference"].dropna().to_numpy(dtype=float)
+            sign = -1.0 if key == "source_retention_delta" else 1.0
+            diffs=df[f"{key}_difference"].dropna().to_numpy(dtype=float) * sign
             if diffs.size:
                 mean=float(np.mean(diffs))
                 sd=float(np.std(diffs,ddof=1)) if diffs.size>1 else float("nan")
