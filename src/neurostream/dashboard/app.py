@@ -153,7 +153,7 @@ subject_id = st.sidebar.selectbox(
     help="Select any of the 9 benchmark subjects. Loads real Phase A SNN weights and prototypes.",
 )
 
-manifest_path = Path("results/checkpoints/evaluation_manifest.json")
+manifest_path = Path(__file__).resolve().parents[3] / "scripts" / "results" / "checkpoints" / "evaluation_manifest.json"
 selected_run = None
 manifest_runs_by_subject: dict[int, list[dict[str, object]]] = {}
 if manifest_path.exists():
@@ -184,8 +184,8 @@ if selected_run is not None:
     artifact_file = Path(selected_run["evaluation_artifact"])
     proto_file = ckpt_file.with_name(f"prototypes_subject_{subject_id}.pt")
 else:
-    ckpt_file = Path(f"results/checkpoints/phase_a_subject_{subject_id}.pt")
-    proto_file = Path(f"results/checkpoints/prototypes_subject_{subject_id}.pt")
+    ckpt_file = Path(__file__).resolve().parents[3] / "scripts" / "results" / "checkpoints" / f"phase_a_subject_{subject_id}.pt"
+    proto_file = Path(__file__).resolve().parents[3] / "scripts" / "results" / "checkpoints" / f"prototypes_subject_{subject_id}.pt"
     artifact_file = ckpt_file.parent / f"evaluation_subject_{subject_id}.json"
 
 if not ckpt_file.exists() or not proto_file.exists():
@@ -350,7 +350,7 @@ with tab_replay:
             "Streaming Replay Position (Trial Index)",
             min_value=1,
             max_value=total_steps,
-            key="trial_slider",
+            key=f"trial_slider_{subject_id}_{projection_type}",
             help="Drag to inspect prototype positions, confidence scores, and adaptation decisions at any timestep.",
         )
 
@@ -420,7 +420,7 @@ with tab_replay:
             )
 
         # 2. Session 2 trials streamed up to current_step
-        s2_pts = np.array([sim_data.steps[i].feature_2d for i in range(current_step)])
+        s2_pts = sim_data.session2_features_2d[:current_step]
         s2_labels = sim_data.session2_labels[:current_step]
         for c_idx, c_name in enumerate(sim_data.class_names):
             mask_s2 = s2_labels == c_idx
