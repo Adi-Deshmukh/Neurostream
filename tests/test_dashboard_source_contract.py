@@ -96,6 +96,7 @@ def test_all_dashboard_pages_render_without_experiment_artifacts():
         "0train": fixture, "1test": fixture,
     }
     app.session_state["ns_signal_subject"] = 1
+    app.session_state["ns_signal_identity"] = "default:1"
     app.sidebar.radio[0].set_value("Signal Analysis").run()
     assert not app.exception, "Signal Analysis failed to render fixture epochs"
     power_button = next(
