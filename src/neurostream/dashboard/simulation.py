@@ -410,6 +410,8 @@ class TrialReplayEngine:
         instance.session1_initial_accuracy = float(metadata["session1_initial_accuracy"])
         measurement_data = dict(metadata["measurement"])
         measurement_data.pop("units", None)
+        if measurement_data.get("checkpoint_ref") != checkpoint_ref:
+            raise ValueError("prepared measurement checkpoint hash mismatch")
         instance.measurement = SpikeActivityMeasurement(**measurement_data)
         return instance
 
