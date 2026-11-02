@@ -251,9 +251,14 @@ pull_rate = st.sidebar.slider("Pull Strength (λ)", min_value=0.1, max_value=1.0
 
 
 @st.cache_resource(show_spinner="Loading prepared replay features...")
-def load_engine(c_path: str, p_path: str, s_id: int, proj: str) -> TrialReplayEngine:
-    checkpoint_ref = hashlib.sha256(Path(c_path).read_bytes()).hexdigest()
-    prototypes_ref = hashlib.sha256(Path(p_path).read_bytes()).hexdigest()
+def load_engine(
+    c_path: str,
+    p_path: str,
+    s_id: int,
+    proj: str,
+    checkpoint_ref: str,
+    prototypes_ref: str,
+) -> TrialReplayEngine:
     artifact_dir = (
         PROJECT_ROOT / "results" / "dashboard_cache"
         / f"subject_{s_id}_{Path(c_path).stem}_{proj.lower()}"
@@ -331,9 +336,15 @@ if requires_replay:
             + str(subject_id) + " --projection " + projection_type + "`."
         )
 
-    engine = load_engine(str(ckpt_file), str(proto_file), subject_id, projection_type)
+    checkpoint_ref = hashlib.sha256(ckpt_file.read_bytes()).hexdigest()
+    prototypes_ref = hashlib.sha256(proto_file.read_bytes()).hexdigest()
+    engine = load_engine(
+        str(ckpt_file), str(proto_file), subject_id, projection_type,
+        checkpoint_ref, prototypes_ref,
+    )
     replay_identity = (
-        f"{engine.checkpoint_ref}:subject-{subject_id}:projection-{projection_type}"
+        f"{engine.checkpoint_ref}:{engine.prototypes_ref}:"
+        f"subject-{subject_id}:projection-{projection_type}"
     )
     sim_data = run_cached_replay(
         engine,
