@@ -313,9 +313,10 @@ if requires_replay:
         )
         st.stop()
 
-    checkpoint_data = torch.load(
-        ckpt_file, map_location="cpu", weights_only=False
-    )
+    if active_page == "Measured Spike Activity":
+        checkpoint_data = torch.load(
+            ckpt_file, map_location="cpu", weights_only=False
+        )
     prepared_cache_dir = (
         PROJECT_ROOT / "results" / "dashboard_cache"
         / f"subject_{subject_id}_{ckpt_file.stem}_{projection_type.lower()}"
