@@ -46,6 +46,8 @@ def discover_experiments(root: Path | None = None) -> list[dict[str, Any]]:
     for manifest_path in _manifest_paths(root):
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if not isinstance(manifest, dict):
+                raise ValueError("manifest root must be a JSON object")
             runs = manifest.get("runs", [])
             if not isinstance(runs, list):
                 raise ValueError("manifest 'runs' must be a list")
@@ -89,7 +91,7 @@ def discover_experiments(root: Path | None = None) -> list[dict[str, Any]]:
                             label_names=list(artifact.get("label_names", [])),
                             run_config=config,
                         )
-                    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+                    except Exception as exc:
                         row["status"] = "invalid_artifact"
                         row["error"] = str(exc)
                 discovered[key] = row
@@ -152,7 +154,7 @@ def discover_ablation_reports(root: Path | None = None) -> list[dict[str, Any]]:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, json.JSONDecodeError):
             continue
-        if (
+        if isinstance(payload, dict) and (
             payload.get("protocol") == "paired_subject_seed_consolidation_ablation"
             and isinstance(payload.get("conditions"), dict)
             and {"enabled", "disabled"}.issubset(payload["conditions"])
