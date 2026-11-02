@@ -253,6 +253,7 @@ pull_rate = st.sidebar.slider("Pull Strength (λ)", min_value=0.1, max_value=1.0
 @st.cache_resource(show_spinner="Loading prepared replay features...")
 def load_engine(c_path: str, p_path: str, s_id: int, proj: str) -> TrialReplayEngine:
     checkpoint_ref = hashlib.sha256(Path(c_path).read_bytes()).hexdigest()
+    prototypes_ref = hashlib.sha256(Path(p_path).read_bytes()).hexdigest()
     artifact_dir = (
         PROJECT_ROOT / "results" / "dashboard_cache"
         / f"subject_{s_id}_{Path(c_path).stem}_{proj.lower()}"
@@ -263,6 +264,7 @@ def load_engine(c_path: str, p_path: str, s_id: int, proj: str) -> TrialReplayEn
                 artifact_dir,
                 checkpoint_ref=checkpoint_ref,
                 subject=s_id,
+                prototypes_ref=prototypes_ref,
             )
         except (OSError, ValueError, KeyError, ImportError, EOFError, json.JSONDecodeError) as error:
             st.warning(
