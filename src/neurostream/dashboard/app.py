@@ -213,6 +213,7 @@ active_page = st.sidebar.radio(
     options=[
         "Offline Trial Replay",
         "EEG Signal Analysis",
+        "Model Diagnostics",
         "Cross-Subject Benchmarks",
         "Measured Spike Activity",
         "Platform Guide",
@@ -353,8 +354,9 @@ checkpoint_data = {}
 encoder_timesteps = None
 encoder_channels = None
 total_steps = 0
+requires_engine = requires_replay or active_page == "Model Diagnostics"
 
-if requires_replay:
+if requires_engine:
     if not ckpt_file.exists() or not proto_file.exists():
         st.sidebar.error(
             f"Checkpoint for Subject {subject_id} not found in results/checkpoints/"
@@ -365,6 +367,7 @@ if requires_replay:
         checkpoint_data = torch.load(
             ckpt_file, map_location="cpu", weights_only=False
         )
+
     prepared_cache_dir = (
         PROJECT_ROOT / "results" / "dashboard_cache"
         / f"subject_{subject_id}_{ckpt_file.stem}_{projection_type.lower()}"
@@ -389,32 +392,36 @@ if requires_replay:
         str(ckpt_file), str(proto_file), subject_id, projection_type,
         checkpoint_ref, prototypes_ref,
     )
-    replay_identity = (
-        f"{engine.checkpoint_ref}:{engine.prototypes_ref}:"
-        f"subject-{subject_id}:projection-{projection_type}"
-    )
-    sim_data = run_cached_replay(
-        engine,
-        replay_identity,
-        momentum,
-        confidence_thresh,
-        enable_consolidation,
-        int(cons_interval),
-        int(sleep_steps),
-        pull_rate,
-    )
-    measurement = sim_data.measurement
-    if measurement is None or measurement.checkpoint_ref != engine.checkpoint_ref:
-        st.error(
-            "Current simulation measurements are unavailable or do not match "
-            "the selected checkpoint."
+
+    if requires_replay:
+        replay_identity = (
+            f"{engine.checkpoint_ref}:{engine.prototypes_ref}:"
+            f"subject-{subject_id}:projection-{projection_type}"
         )
-        measurement = None
+        sim_data = run_cached_replay(
+            engine,
+            replay_identity,
+            momentum,
+            confidence_thresh,
+            enable_consolidation,
+            int(cons_interval),
+            int(sleep_steps),
+            pull_rate,
+        )
+        measurement = sim_data.measurement
+        if measurement is None or measurement.checkpoint_ref != engine.checkpoint_ref:
+            st.error(
+                "Current simulation measurements are unavailable or do not match "
+                "the selected checkpoint."
+            )
+            measurement = None
+        total_steps = len(sim_data.steps)
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Run Provenance")
     st.sidebar.caption(f"Checkpoint: `{ckpt_file}`")
     st.sidebar.caption(f"Checkpoint SHA-256: `{engine.checkpoint_ref}`")
+    st.sidebar.caption(f"Prototype SHA-256: `{engine.prototypes_ref}`")
     if artifact_file.exists():
         try:
             selected_artifact = load_evaluation_artifact(
@@ -444,7 +451,7 @@ if requires_replay:
         encoder_channels = encoder_metadata.get("channel_count")
         if encoder_timesteps is None or encoder_channels is None:
             st.error("Selected checkpoint lacks encoder timestep/channel metadata.")
-    total_steps = len(sim_data.steps)
+
 
 def _format_activity(value: float | None) -> str:
     if value is None or not np.isfinite(value):
