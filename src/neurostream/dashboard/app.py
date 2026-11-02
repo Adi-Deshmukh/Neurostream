@@ -18,6 +18,7 @@ import streamlit as st
 from neurostream.dashboard.registry import (
     discover_ablation_reports,
     discover_experiments,
+    load_preprocessing_contract,
     paired_ablation_rows,
     project_root,
     resolve_artifact_path,
@@ -136,7 +137,7 @@ if st.sidebar.button("Refresh artifact registry", use_container_width=True):
     st.session_state.ns_registry = discover_experiments(ROOT)
     st.rerun()
 
-run = selected_run(registry) if page in ("Overview", "Model Diagnostics", "Adaptation Replay") else None
+run = selected_run(registry) if page in ("Overview", "Signal Analysis", "Model Diagnostics", "Adaptation Replay") else None
 
 if page == "Overview":
     header("Experiment overview", "Validated cross-session results. Every displayed metric is sourced from a checkpoint-matched evaluation artifact.")
@@ -173,20 +174,108 @@ if page == "Overview":
         st.caption("Prequential accuracy is trial-by-trial prediction before that trial's prototype update. Retrospective accuracy is a separate post-replay diagnostic.")
 
 elif page == "Signal Analysis":
-    header("EEG signal analysis", "Inspect preprocessed BNCI2014-001 epochs. Dataset loading is explicit and may require a first-time MOABB download.")
-    subject = st.selectbox("Subject", list(range(1, 10)), format_func=lambda s: f"S{s:02d}")
+    header("EEG signal analysis", "Inspect preprocessed BNCI2014-001 epochs. Dataset loading is explicit and uses the selected checkpoint's preprocessing contract when available.")
+    if run is not None:
+        subject = int(run["subject"])
+        signal_identity = run["artifact"]["checkpoint_sha256"]
+        st.caption(f"Bound to S{subject:02d} · seed {run['seed']} · run {run['artifact']['run_id']}")
+    else:
+        subject = st.selectbox("Subject", list(range(1, 10)), format_func=lambda s: f"S{s:02d}")
+        signal_identity = f"default:{subject}"
+        st.info("No validated experiment is selected. Loading uses the BNCI2014-001 loader defaults and is not bound to a model checkpoint.")
     if st.button("Load EEG sessions", type="primary"):
         try:
             with st.spinner("Loading the selected subject's EEG sessions..."):
                 from neurostream.data.loader import load_bnci2014_001
-                st.session_state["ns_signal_sessions"] = load_bnci2014_001(subjects=subject)
+                sessions = None
+                cue_offset = 2.0
+                contract_summary = None
+                if run is not None:
+                    config = run.get("run_config", {})
+                    if config.get("dataset_name", "BNCI2014_001") not in {"BNCI2014_001", "BNCI2014-001"}:
+                        raise ValueError("The selected run does not use BNCI2014-001.")
+                    contract = load_preprocessing_contract(
+                        run["checkpoint_path"],
+                        expected_sha256=run["artifact"]["checkpoint_sha256"],
+                    )
+                    epoch = contract.get("epoch_window_seconds", {})
+                    filters = contract.get("filter_settings", {})
+                    tmin = float(epoch.get("tmin", config.get("epoch_tmin", 2.0)))
+                    tmax = float(epoch.get("tmax", config.get("epoch_tmax", 6.0)))
+                    l_freq = float(filters.get("l_freq_hz", config.get("filter_l_freq_hz", 4.0)))
+                    h_freq = float(filters.get("h_freq_hz", config.get("filter_h_freq_hz", 100.0)))
+                    reference = epoch.get("reference", config.get("epoch_reference", "trial_start"))
+                    cue_offset = float(epoch.get("cue_onset_offset_seconds", config.get("cue_onset_offset_seconds", 2.0)))
+                    if reference != "trial_start":
+                        raise ValueError(f"Unsupported epoch reference in checkpoint contract: {reference}")
+                    expected_sfreq = contract.get("sampling_frequency_hz", config.get("sampling_frequency_hz"))
+                    dataset_path_value = config.get("dataset_path")
+                    cache_path_value = config.get("cache_path")
+                    dataset_path = resolve_artifact_path(ROOT, dataset_path_value) if dataset_path_value else None
+                    cache_path = resolve_artifact_path(ROOT, cache_path_value) if cache_path_value else None
+                    sessions = load_bnci2014_001(
+                        subjects=subject, tmin=tmin, tmax=tmax,
+                        l_freq=l_freq, h_freq=h_freq, epoch_reference=reference,
+                        normalization="demean",
+                        dataset_path=str(dataset_path) if dataset_path else None,
+                        cache_path=str(cache_path) if cache_path else None,
+                    )
+                    channel_order = contract.get("channel_order")
+                    norm_payload = contract.get("normalization")
+                    for session in sessions.values():
+                        if expected_sfreq is not None and not np.isclose(
+                            session.sfreq, float(expected_sfreq), atol=1e-3
+                        ):
+                            raise ValueError(
+                                f"Session sampling frequency {session.sfreq:g} Hz does not match "
+                                f"checkpoint contract {float(expected_sfreq):g} Hz."
+                            )
+                        if channel_order and list(session.channel_names) != list(channel_order):
+                            raise ValueError("EEG channel order does not match the checkpoint preprocessing contract.")
+                        if not isinstance(norm_payload, dict):
+                            raise ValueError("Checkpoint normalization metadata is missing or malformed.")
+                        method = norm_payload.get("method")
+                        if method == "training_fitted_channel_zscore":
+                            mean = np.asarray(norm_payload.get("mean"), dtype=np.float32).reshape(-1)
+                            std = np.asarray(norm_payload.get("std"), dtype=np.float32).reshape(-1)
+                            if mean.size != session.X.shape[1] or std.size != session.X.shape[1]:
+                                raise ValueError("Saved channel normalizer dimensions do not match the EEG channels.")
+                            if not np.isfinite(mean).all() or not np.isfinite(std).all() or np.any(std <= 0):
+                                raise ValueError("Saved channel normalizer contains invalid values.")
+                            session.X = (
+                                (session.X - mean.reshape(1, -1, 1))
+                                / std.reshape(1, -1, 1)
+                            ).astype(np.float32, copy=False)
+                        elif method == "per_trial_channel_zscore":
+                            from neurostream.data.preprocessing import zscore_channels
+                            session.X = zscore_channels(session.X)
+                        elif method != "per_trial_demean_preserve_channel_scale":
+                            raise ValueError(f"Unsupported checkpoint normalization method: {method}")
+                        session.normalization = {"method": method}
+                    contract_summary = {
+                        "epoch_window_seconds": {"tmin": tmin, "tmax": tmax, "reference": reference},
+                        "filter_settings": {"l_freq_hz": l_freq, "h_freq_hz": h_freq},
+                        "normalization": norm_payload.get("method") if isinstance(norm_payload, dict) else None,
+                        "sampling_frequency_hz": expected_sfreq,
+                        "channel_order": channel_order,
+                    }
+                else:
+                    sessions = load_bnci2014_001(subjects=subject)
+                st.session_state["ns_signal_sessions"] = sessions
                 st.session_state["ns_signal_subject"] = subject
+                st.session_state["ns_signal_identity"] = signal_identity
+                st.session_state["ns_signal_cue_offset"] = cue_offset
+                st.session_state["ns_signal_contract"] = contract_summary
         except Exception as error:
-            st.error("EEG session loading failed. Check the MOABB dataset cache, network access and preprocessing dependencies.")
+            st.error("EEG session loading failed. Check the MOABB dataset cache, network access and selected checkpoint preprocessing contract.")
             st.exception(error)
     sessions = st.session_state.get("ns_signal_sessions")
-    if not sessions or st.session_state.get("ns_signal_subject") != subject:
-        st.info("EEG is not loaded. Select a subject and click Load EEG sessions. This operation is separate from dashboard navigation.")
+    if (
+        not sessions
+        or st.session_state.get("ns_signal_subject") != subject
+        or st.session_state.get("ns_signal_identity") != signal_identity
+    ):
+        st.info("EEG is not loaded for this subject/experiment. Click Load EEG sessions; loading is separate from dashboard navigation.")
     else:
         names = list(sessions)
         session_name = st.selectbox("Session", names)
@@ -206,17 +295,18 @@ elif page == "Signal Analysis":
         time = np.arange(a, b) / data.sfreq
         signal = data.X[trial, channel, a:b]
         fig = go.Figure(go.Scatter(x=time, y=signal, mode="lines", line=dict(color="#3976A8", width=1.2), name=channel_names[channel]))
-        if data.epoch_reference == "trial_start":
-            cue_time = 2.0 - data.tmin
-            if start_s <= cue_time <= end_s:
-                fig.add_vline(
-                    x=cue_time, line_dash="dash", line_color="#D39A45",
-                    annotation_text="Imagery cue onset",
-                )
+        cue_time = float(st.session_state.get("ns_signal_cue_offset", 2.0)) - data.tmin
+        if data.epoch_reference == "trial_start" and start_s <= cue_time <= end_s:
+            fig.add_vline(
+                x=cue_time, line_dash="dash", line_color="#D39A45",
+                annotation_text="Imagery cue onset",
+            )
         fig.update_layout(title=f"{session_name} · trial {trial+1} · {channel_names[channel]}",
                           xaxis_title="Time (s) from epoch start", yaxis_title="Amplitude (preprocessed units)", height=380)
         st.plotly_chart(fig, use_container_width=True)
         st.caption(f"Sampling rate: {data.sfreq:g} Hz · epoch: {data.tmin:g} to {data.tmax:g} s relative to {data.epoch_reference} · preprocessing: {data.l_freq:g}–{data.h_freq:g} Hz band-pass.")
+        if st.session_state.get("ns_signal_contract"):
+            st.caption(f"Checkpoint preprocessing contract: {st.session_state['ns_signal_contract']}")
         if st.button("Compute channel × band power"):
             from scipy.signal import welch
             freqs, psd = welch(data.X[trial], fs=data.sfreq, axis=-1, nperseg=min(256, data.X.shape[-1]))
@@ -270,7 +360,7 @@ elif page == "Signal Analysis":
         q4.metric("Max peak-to-peak", number(float(np.ptp(epoch, axis=-1).max()), 5))
         if flat_channels:
             st.warning("Flat channels: " + ", ".join(flat_channels))
-        st.info("Only preprocessed epochs are available from this loader. Raw continuous, filtered-only, and normalized-stage signals are not separately retained here; the displayed waveform must not be labelled raw.")
+        st.info("The loader returns preprocessed epochs, not raw continuous EEG. Raw, filtered-only and normalized-stage signals are not separately retained here; the displayed waveform must not be labelled raw.")
 
 elif page == "Model Diagnostics":
     header("Model diagnostics", "Feature-space and measured spike-activity diagnostics from the selected prepared replay artifact.")
