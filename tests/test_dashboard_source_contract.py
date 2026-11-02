@@ -133,7 +133,7 @@ def test_visual_analytics_workspace_contains_all_eight_requested_panels():
         "8 · Consolidation ablation comparison",
     ):
         assert title in source
-    assert "No layer-level measurement is attached" in source
+    assert "precompute step already records per-layer spike activity" in source
     assert "Only exact matched subject–seed pairs" in source
 
 
