@@ -511,7 +511,11 @@ elif page == "Adaptation Replay":
         checkpoint = run["checkpoint_path"]
         prototype = checkpoint.with_name(f"prototypes_subject_{subject}.pt")
         projection = st.selectbox("Projection basis", ["PCA", "UMAP"], index=0)
-        cache_dir = ROOT / "results" / "dashboard_cache" / f"subject_{subject}_{checkpoint.stem}_{projection.lower()}"
+        prototype_hash = hashlib.sha256(prototype.read_bytes()).hexdigest() if prototype.is_file() else "missing"
+        cache_dir = ROOT / "results" / "dashboard_cache" / (
+            f"subject_{subject}_{checkpoint.stem}_"
+            f"{run['artifact']['checkpoint_sha256'][:12]}_{prototype_hash[:12]}_{projection.lower()}"
+        )
         cache_file = cache_dir / "metadata.json"
         cache_inputs = (
             cache_file, cache_dir / "features.npz", cache_dir / "projector.joblib"
@@ -526,7 +530,6 @@ elif page == "Adaptation Replay":
         elif not prototype.is_file():
             st.warning(f"Prototype file not found next to selected checkpoint: {prototype}")
         else:
-            prototype_hash = hashlib.sha256(prototype.read_bytes()).hexdigest()
             cache_signature = ":".join(
                 f"{path.stat().st_mtime_ns}-{path.stat().st_size}"
                 for path in cache_inputs
