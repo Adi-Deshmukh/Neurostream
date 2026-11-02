@@ -89,6 +89,7 @@ def test_feature_only_prepared_artifact_round_trip(mock_replay_engine, tmp_path)
         artifact_dir,
         checkpoint_ref=engine.checkpoint_ref,
         subject=engine.subject,
+        prototypes_ref=engine.prototypes_ref,
     )
 
     assert loaded.s1_spikes is None
@@ -125,6 +126,7 @@ def test_prepared_artifact_rejects_checkpoint_mismatch(mock_replay_engine, tmp_p
             artifact_dir,
             checkpoint_ref="wrong-checkpoint-hash",
             subject=mock_replay_engine.subject,
+            prototypes_ref=mock_replay_engine.prototypes_ref,
         )
 
 
@@ -151,3 +153,15 @@ def test_sleep_consolidation_replay_is_reproducible(mock_replay_engine):
         first.prototype_history_2d,
         second.prototype_history_2d,
     )
+
+def test_prepared_artifact_rejects_prototype_mismatch(mock_replay_engine, tmp_path):
+    artifact_dir = tmp_path / "prepared_subject_1"
+    mock_replay_engine.save_prepared_artifact(artifact_dir)
+
+    with pytest.raises(ValueError, match="prototype hash mismatch"):
+        TrialReplayEngine.from_prepared_artifact(
+            artifact_dir,
+            checkpoint_ref=mock_replay_engine.checkpoint_ref,
+            subject=mock_replay_engine.subject,
+            prototypes_ref="wrong-prototype-hash",
+        )
