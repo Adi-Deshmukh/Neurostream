@@ -22,6 +22,15 @@ def resolve_repo_path(project_root: str | Path, value: str | Path) -> Path:
     )
 
 
-def trial_slider_key(subject: int, projection: str) -> str:
-    """Return a stable, subject/projection-scoped Streamlit slider key."""
-    return f"trial_slider_{int(subject)}_{str(projection).lower()}"
+def trial_slider_key(
+    subject: int, projection: str, checkpoint_identity: str | None = None
+) -> str:
+    """Return a stable slider key scoped to subject, projection, and checkpoint."""
+    key = f"trial_slider_{int(subject)}_{str(projection).lower()}"
+    if checkpoint_identity:
+        safe_identity = "".join(
+            character if character.isalnum() or character in "-_" else "_"
+            for character in str(checkpoint_identity)
+        )
+        key = f"{key}_{safe_identity}"
+    return key
