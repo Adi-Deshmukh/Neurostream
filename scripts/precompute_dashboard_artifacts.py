@@ -19,16 +19,16 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from neurostream.dashboard.simulation import TrialReplayEngine
 
 
-def _default_checkpoint_dir() -> Path:
+def _default_checkpoint_dir(subject: int = 1) -> Path:
     candidates = (
         PROJECT_ROOT / "results" / "checkpoints",
         PROJECT_ROOT / "scripts" / "results" / "checkpoints",
     )
     for path in candidates:
-        if (path / "phase_a_subject_1.pt").is_file():
+        if (path / f"phase_a_subject_{subject}.pt").is_file():
             return path
-        if any(path.glob("sub_*/seed_*/phase_a_subject_*.pt")):
-            return path
+    # Sweep checkpoints are nested by subject and seed. If no unambiguous
+    # direct checkpoint exists, require --checkpoint/--prototypes explicitly.
     return candidates[0]
 
 
@@ -41,7 +41,7 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, default=PROJECT_ROOT / "results" / "dashboard_cache")
     args = parser.parse_args()
 
-    checkpoint_dir = _default_checkpoint_dir()
+    checkpoint_dir = _default_checkpoint_dir(args.subject)
     checkpoint = (args.checkpoint or checkpoint_dir / f"phase_a_subject_{args.subject}.pt").resolve()
     prototypes = (args.prototypes or checkpoint_dir / f"prototypes_subject_{args.subject}.pt").resolve()
     if not checkpoint.is_file():
