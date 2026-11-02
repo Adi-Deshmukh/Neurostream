@@ -144,12 +144,13 @@ if page == "Overview":
     else:
         run = run or valid[0]
         m = run["metrics"]
-        cols = st.columns(5)
+        cols = st.columns(6)
         cols[0].metric("Static target baseline", pct(m.get("target_static_baseline_acc")))
         cols[1].metric("Prequential target", pct(m.get("target_prequential_acc")))
         cols[2].metric("Retrospective diagnostic", pct(m.get("target_retrospective_acc")))
         cols[3].metric("Source retention", pct(m.get("source_accuracy_after_adaptation")))
         cols[4].metric("Adaptation gain", pct(m.get("adaptation_gain")))
+        cols[5].metric("Measured spike activity", pct(m.get("spike_sparsity")))
         st.caption(f"Selected S{run['subject']:02d} · seed {run['seed']} · run {run['artifact']['run_id']} · evaluation {run['artifact']['evaluation_session']}")
         df = metric_frame(valid)
         left, right = st.columns([1.4, 1])
@@ -500,6 +501,20 @@ elif page == "Adaptation Replay":
                             height=300,
                         )
                         st.plotly_chart(drift_fig, use_container_width=True)
+                        confidence_fig = go.Figure(go.Histogram(
+                            x=[item.confidence for item in replay.steps[:current]],
+                            nbinsx=20, marker_color="#3976A8",
+                        ))
+                        confidence_fig.add_vline(
+                            x=threshold, line_dash="dash", line_color="#D39A45",
+                            annotation_text="Acceptance threshold",
+                        )
+                        confidence_fig.update_layout(
+                            title="Confidence distribution through current trial",
+                            xaxis_title="Prediction confidence", yaxis_title="Trial count",
+                            height=300,
+                        )
+                        st.plotly_chart(confidence_fig, use_container_width=True)
                         displacement = np.linalg.norm(
                             step.prototypes_2d - replay.initial_prototypes_2d, axis=1
                         )
@@ -604,6 +619,20 @@ elif page == "Consolidation Study":
                 st.plotly_chart(fig,use_container_width=True)
             else:
                 st.info("Selected outcome is not available for the matched pairs.")
+            trigger_rows = []
+            for condition in ("enabled", "disabled"):
+                for item in report.get("conditions", {}).get(condition, {}).get("runs", []):
+                    trigger_rows.append({
+                        "Condition": condition,
+                        "Subject": item.get("subject"),
+                        "Seed": item.get("seed"),
+                        "Consolidation phases": item.get("consolidation_phases"),
+                    })
+            if trigger_rows:
+                st.markdown("#### Consolidation trigger frequency")
+                trigger_frame = pd.DataFrame(trigger_rows)
+                st.dataframe(trigger_frame, use_container_width=True, hide_index=True)
+            st.caption("The current ablation report records consolidation phase counts but not prototype coordinates immediately before and after each consolidation event. Those drift measurements are therefore not fabricated or plotted.")
             st.dataframe(df,use_container_width=True,hide_index=True)
 
 elif page == "Experiment Registry":
