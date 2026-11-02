@@ -78,3 +78,51 @@ def test_replay_simulation_execution(mock_replay_engine):
     last_step_protos = sim.steps[-1].prototypes_2d
     # At least some prototypes should have adapted
     assert not np.allclose(first_step_protos, last_step_protos, atol=1e-6)
+
+
+def test_feature_only_prepared_artifact_round_trip(mock_replay_engine, tmp_path):
+    engine = mock_replay_engine
+    artifact_dir = tmp_path / "prepared_subject_1"
+    engine.save_prepared_artifact(artifact_dir)
+
+    loaded = TrialReplayEngine.from_prepared_artifact(
+        artifact_dir,
+        checkpoint_ref=engine.checkpoint_ref,
+        subject=engine.subject,
+    )
+
+    assert loaded.s1_spikes is None
+    assert loaded.s2_spikes is None
+    assert loaded.model is None
+    np.testing.assert_allclose(loaded.s1_features, engine.s1_features)
+    np.testing.assert_allclose(loaded.s2_features, engine.s2_features)
+    np.testing.assert_array_equal(loaded.s1_labels, engine.s1_labels)
+    np.testing.assert_array_equal(loaded.s2_labels, engine.s2_labels)
+    assert loaded.measurement is not None
+    assert loaded.measurement.checkpoint_ref == engine.checkpoint_ref
+
+    original_replay = engine.run_replay(
+        momentum=0.9, confidence_threshold=0.5, enable_consolidation=False
+    )
+    cached_replay = loaded.run_replay(
+        momentum=0.9, confidence_threshold=0.5, enable_consolidation=False
+    )
+    assert cached_replay.adapted_target_accuracy == pytest.approx(
+        original_replay.adapted_target_accuracy
+    )
+    np.testing.assert_allclose(
+        cached_replay.prototype_history_2d,
+        original_replay.prototype_history_2d,
+    )
+
+
+def test_prepared_artifact_rejects_checkpoint_mismatch(mock_replay_engine, tmp_path):
+    artifact_dir = tmp_path / "prepared_subject_1"
+    mock_replay_engine.save_prepared_artifact(artifact_dir)
+
+    with pytest.raises(ValueError, match="checkpoint hash mismatch"):
+        TrialReplayEngine.from_prepared_artifact(
+            artifact_dir,
+            checkpoint_ref="wrong-checkpoint-hash",
+            subject=mock_replay_engine.subject,
+        )
