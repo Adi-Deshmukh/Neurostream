@@ -220,34 +220,53 @@ active_page = st.sidebar.radio(
 requires_replay = active_page in ("Offline Trial Replay", "Measured Spike Activity")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### ⚡ Phase B Streaming Parameters")
-momentum = st.sidebar.slider(
-    "Prototype Momentum (1 - α)",
-    min_value=0.50,
-    max_value=0.99,
-    value=0.90,
-    step=0.01,
-    help="EMA inertia. High values (0.90+) adapt smoothly; lower values follow rapid distribution shifts.",
+st.sidebar.markdown("### ⚙️ Replay Configuration")
+st.sidebar.caption(
+    "Adjust the parameters, then apply them once. This prevents every slider "
+    "movement from launching a complete replay."
 )
-confidence_thresh = st.sidebar.slider(
-    "Confidence Threshold (τ)",
-    min_value=0.25,
-    max_value=0.95,
-    value=0.60,
-    step=0.05,
-    help="Minimum cosine softmax confidence required to update prototype positions.",
-)
+with st.sidebar.form("replay_configuration_form"):
+    momentum = st.slider(
+        "Prototype Momentum (1 - α)",
+        min_value=0.50,
+        max_value=0.99,
+        value=0.90,
+        step=0.01,
+        key="replay_momentum",
+        help="Higher values adapt more smoothly; lower values follow distribution shifts more quickly.",
+    )
+    confidence_thresh = st.slider(
+        "Confidence Threshold (τ)",
+        min_value=0.25,
+        max_value=0.95,
+        value=0.60,
+        step=0.05,
+        key="replay_confidence_threshold",
+        help="Minimum cosine softmax confidence required to update prototype positions.",
+    )
+    st.markdown("#### Sleep Consolidation")
+    enable_consolidation = st.checkbox(
+        "Enable Sleep Consolidation",
+        value=True,
+        key="replay_enable_consolidation",
+        help="Uses synthetic noisy feature snapshots around Session 1 prototypes.",
+    )
+    cons_interval = st.number_input(
+        "Interval (steps)", min_value=10, max_value=100, value=25, step=5,
+        key="replay_consolidation_interval",
+    )
+    sleep_steps = st.number_input(
+        "Correction Iterations", min_value=1, max_value=15, value=5,
+        key="replay_sleep_steps",
+    )
+    pull_rate = st.slider(
+        "Pull Strength (λ)", min_value=0.1, max_value=1.0,
+        value=0.5, step=0.1, key="replay_pull_rate",
+    )
+    apply_replay_config = st.form_submit_button(
+        "Apply replay settings", type="primary", width="stretch"
+    )
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🌙 Sleep Consolidation")
-enable_consolidation = st.sidebar.checkbox(
-    "Enable Sleep Consolidation",
-    value=True,
-    help="Generates synthetic noisy feature snapshots around S1 prototypes to prevent catastrophic forgetting.",
-)
-cons_interval = st.sidebar.number_input("Interval (steps)", min_value=10, max_value=100, value=25, step=5)
-sleep_steps = st.sidebar.number_input("Correction Iterations", min_value=1, max_value=15, value=5)
-pull_rate = st.sidebar.slider("Pull Strength (λ)", min_value=0.1, max_value=1.0, value=0.5, step=0.1)
 
 
 @st.cache_data(show_spinner=False)
@@ -422,33 +441,45 @@ def _format_activity(value: float | None) -> str:
 # =============================================================================
 if active_page == "Offline Trial Replay":
     # Playback Controls Bar
+    if total_steps < 1:
+        st.error(
+            "The replay contains no Session 2 trials. Check the selected checkpoint, "
+            "dataset download, and evaluation manifest."
+        )
+        st.stop()
+
     ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2.4, 1.0, 1.0])
+    slider_key = trial_slider_key(subject_id, projection_type, engine.checkpoint_ref)
 
-    slider_key = trial_slider_key(subject_id, projection_type, ckpt_file.stem)
-
-    def _jump_to(widget_key: str, step_val: int):
-        st.session_state[widget_key] = step_val
+    # Clamp any state left over from a previous run before creating the widget.
+    if slider_key in st.session_state:
+        st.session_state[slider_key] = min(
+            max(int(st.session_state[slider_key]), 1), total_steps
+        )
 
     with ctrl_col2:
         st.write("")
         st.write("")
-        st.button("⏩ Jump to End", width="stretch", on_click=_jump_to, args=(slider_key, total_steps))
+        if st.button("⏩ Jump to End", width="stretch", key="jump_replay_end"):
+            st.session_state[slider_key] = total_steps
 
     with ctrl_col3:
         st.write("")
         st.write("")
-        st.button("⏮️ Jump to Start", width="stretch", on_click=_jump_to, args=(slider_key, 1))
+        if st.button("⏮️ Jump to Start", width="stretch", key="jump_replay_start"):
+            st.session_state[slider_key] = 1
 
     with ctrl_col1:
         current_step = st.slider(
             "Streaming Replay Position (Trial Index)",
             min_value=1,
             max_value=total_steps,
+            value=min(max(int(st.session_state.get(slider_key, 1)), 1), total_steps),
             key=slider_key,
-            help="Drag to inspect prototype positions, confidence scores, and adaptation decisions at any timestep.",
+            help="Move through the precomputed replay. This changes the displayed trial, not the underlying model run.",
         )
 
-    current_step = max(1, min(current_step, total_steps))
+    current_step = min(max(int(current_step), 1), total_steps)
     current_record = sim_data.steps[current_step - 1]
 
     # Metrics Ribbon (Professional 5-Column Grid)
