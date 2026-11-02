@@ -170,7 +170,7 @@ subject_id = st.sidebar.selectbox(
     help="Select any of the 9 benchmark subjects. Loads real Phase A SNN weights and prototypes.",
 )
 
-manifest_path = CHECKPOINT_DIR / "evaluation_manifest.json""
+manifest_path = CHECKPOINT_DIR / "evaluation_manifest.json"
 selected_run = None
 manifest_runs_by_subject: dict[int, list[dict[str, object]]] = {}
 if manifest_path.exists():
