@@ -368,7 +368,7 @@ with tab_replay:
     current_record = sim_data.steps[current_step - 1]
 
     # Metrics Ribbon (Professional 5-Column Grid)
-    m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
+    m_col1, m_col2, m_col3, m_col4, m_col5, m_col6 = st.columns(6)
     m_col1.metric("STREAMED TRIALS", f"{current_step} / {total_steps}")
     
     gain_so_far = current_record.cumulative_accuracy - current_record.static_baseline_accuracy
@@ -396,6 +396,14 @@ with tab_replay:
         ),
         delta="Measured fraction of spike opportunities",
         delta_color="off",
+    )
+    retention_delta = sim_data.session1_retention_accuracy - sim_data.session1_initial_accuracy
+    m_col6.metric(
+        "SESSION 1 TRAIN RETENTION",
+        f"{sim_data.session1_retention_accuracy:.1%}",
+        delta=f"{retention_delta:+.1%} vs initial S1 train",
+        delta_color="normal" if retention_delta >= 0 else "inverse",
+        help="In-sample Session 1 training-set retention after the complete replay. This is a diagnostic, not held-out source generalization.",
     )
 
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
